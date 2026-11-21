@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "ui.h"
+
 constexpr int NUM_INSTRUMENTS = 16;
 constexpr int MAX_VOICES = 64;
 constexpr int QUEUE_SIZE = 256;
@@ -743,7 +745,18 @@ private:
   }
 };
 
-int main(int argc, char** argv) {
+int main() {
+    UI ui;
+
+    if (!ui.init()) {
+        return 1;
+    }
+
+    ui.run();
+    return 0;
+}
+
+/* int main(int argc, char** argv) {
   
   AudioEngine engine;
 
@@ -964,4 +977,4 @@ int main(int argc, char** argv) {
   engine.stop();
 
   return 0;
-}
+  } */

@@ -1,0 +1,296 @@
+
+#include "ui.h"
+
+#include <algorithm>
+#include <cmath>
+
+UI::UI() = default;
+
+UI::~UI() {
+    shutdown();
+}
+
+bool UI::init() {
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        return false;
+    }
+
+    window = SDL_CreateWindow(
+        "Drum Machine",
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        SDL_WINDOW_SHOWN
+    );
+
+    if (!window) {
+        return false;
+    }
+
+    renderer = SDL_CreateRenderer(
+        window,
+        -1,
+        SDL_RENDERER_ACCELERATED |
+        SDL_RENDERER_PRESENTVSYNC
+    );
+
+    if (!renderer) {
+        return false;
+    }
+
+    running = true;
+    return true;
+}
+
+void UI::shutdown() {
+    if (renderer) {
+        SDL_DestroyRenderer(renderer);
+        renderer = nullptr;
+    }
+
+    if (window) {
+        SDL_DestroyWindow(window);
+        window = nullptr;
+    }
+
+    SDL_Quit();
+}
+
+void UI::run() {
+    while (running) {
+        handleEvents();
+        render();
+    }
+}
+
+void UI::handleEvents() {
+    SDL_Event event;
+
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_QUIT) {
+            running = false;
+        }
+    }
+}
+
+void UI::drawText(
+    const std::string& text,
+    int x,
+    int y,
+    SDL_Color color
+) {
+    // Temporary text placeholder.
+    // We'll add a small bitmap font for the OLED next.
+    (void)text;
+    (void)x;
+    (void)y;
+    (void)color;
+}
+
+void UI::renderEncoders() {
+
+  const int centerY = 100;
+  const int spacing = 190;
+  const int startX = 165;
+
+    const char* labels[] = {
+        "LEVEL",
+        "TUNE",
+        "CUTOFF",
+        "DECAY"
+    };
+
+    for (int i = 0; i < 4; ++i) {
+        int x = startX + i * spacing;
+
+        // Encoder outer housing.
+        SDL_SetRenderDrawColor(renderer, 65, 65, 65, 255);
+        SDL_Rect housing{x - 43, centerY - 43, 86, 86};
+        SDL_RenderFillRect(renderer, &housing);
+
+        // Circular knob.
+	drawFilledCircle(x, centerY, 36, {25, 25, 25, 255});	
+
+        // Indicator mark.
+        SDL_SetRenderDrawColor(renderer, 230, 230, 220, 255);
+        SDL_Rect indicator{x - 2, centerY - 30, 4, 12};
+        SDL_RenderFillRect(renderer, &indicator);
+
+        // Parameter label.
+        drawText(labels[i], x - 30, centerY + 53,
+                 {220, 220, 220, 255});
+    }
+}
+
+void UI::renderShiftButton() {
+
+  const int x = 800;
+  const int y = 80;
+
+    // Button housing.
+    SDL_SetRenderDrawColor(renderer, 55, 55, 55, 255);
+    SDL_Rect housing{x - 8, y - 8, 105, 65};
+    SDL_RenderFillRect(renderer, &housing);
+
+    // SHIFT button.
+    SDL_SetRenderDrawColor(renderer, 80, 80, 80, 255);
+    SDL_Rect button{x, y, 65, 40};
+    SDL_RenderFillRect(renderer, &button);
+
+    // Latched-state LED (temporary always-off state).
+    SDL_SetRenderDrawColor(renderer, 55, 55, 55, 255);
+
+    int ledX = x + 32;
+    int ledY = y - 15;
+
+    for (int dy = -5; dy <= 5; ++dy) {
+        for (int dx = -5; dx <= 5; ++dx) {
+            if (dx * dx + dy * dy <= 25) {
+                SDL_RenderDrawPoint(
+                    renderer,
+                    ledX + dx,
+                    ledY + dy
+                );
+            }
+        }
+    }
+
+    drawText("SHIFT", x + 8, y + 13,
+             {255, 255, 255, 255});
+}
+
+void UI::renderOLED() {
+
+  const int x = (WINDOW_WIDTH - OLED_SIZE * OLED_SCALE) / 2;
+  const int y = 200;
+
+    // OLED bezel.
+    SDL_SetRenderDrawColor(renderer, 15, 15, 15, 255);
+    SDL_Rect bezel{
+        x - 12,
+        y - 12,
+        OLED_SIZE * OLED_SCALE + 24,
+        OLED_SIZE * OLED_SCALE + 24
+    };
+    SDL_RenderFillRect(renderer, &bezel);
+
+    // OLED screen.
+    SDL_SetRenderDrawColor(renderer, 3, 18, 10, 255);
+    SDL_Rect screen{
+        x,
+        y,
+        OLED_SIZE * OLED_SCALE,
+        OLED_SIZE * OLED_SCALE
+    };
+    SDL_RenderFillRect(renderer, &screen);
+
+    // Temporary OLED content.
+    SDL_SetRenderDrawColor(renderer, 80, 220, 120, 255);
+
+    SDL_Rect border{
+        x + 8,
+        y + 8,
+        OLED_SIZE * OLED_SCALE - 16,
+        OLED_SIZE * OLED_SCALE - 16
+    };
+    SDL_RenderDrawRect(renderer, &border);
+}
+
+void UI::renderFunctionButtons() {
+
+  const int y = 610;
+    const int width = 95;
+    const int spacing = 115;
+    const int startX = 100;
+
+    const char* labels[] = {
+        "INST",
+        "BANK 1",
+        "BANK 2",
+        "BANK 3",
+        "BANK 4",
+        "LAST STEP"
+    };
+
+    for (int i = 0; i < 6; ++i) {
+        int x = startX + i * spacing;
+
+        SDL_SetRenderDrawColor(renderer, 65, 65, 65, 255);
+        SDL_Rect button{x, y, width, 42};
+        SDL_RenderFillRect(renderer, &button);
+    }
+}
+
+void UI::renderStepButtons() {
+
+  const int count = 16;
+    const int buttonSize = 38;
+    const int spacing = 51;
+    const int startX = 45;
+    const int y = 690;
+
+    for (int i = 0; i < count; ++i) {
+        int x = startX + i * spacing;
+
+        // LED.
+        SDL_SetRenderDrawColor(
+            renderer,
+            i == 0 ? 240 : 45,
+            i == 0 ? 190 : 45,
+            45,
+            255
+        );
+
+        SDL_Rect led{x + 13, y - 13, 12, 7};
+        SDL_RenderFillRect(renderer, &led);
+
+        // Button.
+        SDL_SetRenderDrawColor(renderer, 75, 75, 75, 255);
+        SDL_Rect button{x, y, buttonSize, buttonSize};
+        SDL_RenderFillRect(renderer, &button);
+    }
+}
+
+void UI::render() {
+    SDL_SetRenderDrawColor(renderer, 32, 32, 32, 255);
+    SDL_RenderClear(renderer);
+
+    renderEncoders();
+    renderShiftButton();
+    renderOLED();
+    renderFunctionButtons();
+    renderStepButtons();
+
+    SDL_RenderPresent(renderer);
+}
+
+void UI::drawFilledCircle(
+    int x,
+    int y,
+    int radius,
+    SDL_Color color
+) {
+    SDL_SetRenderDrawColor(
+        renderer,
+        color.r,
+        color.g,
+        color.b,
+        color.a
+    );
+
+    for (int dy = -radius; dy <= radius; ++dy) {
+        int dx = static_cast<int>(
+            std::sqrt(radius * radius - dy * dy)
+        );
+
+        SDL_RenderDrawLine(
+            renderer,
+            x - dx,
+            y + dy,
+            x + dx,
+            y + dy
+        );
+    }
+}
+
