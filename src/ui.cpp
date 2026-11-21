@@ -86,8 +86,18 @@ void UI::handleEvents() {
     SDL_Event event;
 
     while (SDL_PollEvent(&event)) {
+
         if (event.type == SDL_QUIT) {
             running = false;
+        }
+
+        if (event.type == SDL_MOUSEBUTTONDOWN &&
+            event.button.button == SDL_BUTTON_LEFT) {
+
+            handleMouseClick(
+                event.button.x,
+                event.button.y
+            );
         }
     }
 }
@@ -255,7 +265,7 @@ void UI::renderOLED() {
 
 void UI::renderFunctionButtons() {
 
-  const int y = 610;
+    const int y = 610;
     const int width = 95;
     const int spacing = 115;
     const int startX = 100;
@@ -270,55 +280,157 @@ void UI::renderFunctionButtons() {
     };
 
     for (int i = 0; i < 6; ++i) {
+
         int x = startX + i * spacing;
 
-        SDL_SetRenderDrawColor(renderer, 65, 65, 65, 255);
+        bool selected =
+            (i >= 1 && i <= 4 &&
+             selectedBank == i - 1);
+
+        if (selected) {
+            SDL_SetRenderDrawColor(
+                renderer, 35, 100, 55, 255
+            );
+        } else {
+            SDL_SetRenderDrawColor(
+                renderer, 65, 65, 65, 255
+            );
+        }
+
         SDL_Rect button{x, y, width, 42};
         SDL_RenderFillRect(renderer, &button);
 
-	int textWidth = 0;
-	int textHeight = 0;
+        int textWidth = 0;
+        int textHeight = 0;
 
-	if (panelFont) {
-	  TTF_SizeUTF8(panelFont, labels[i], &textWidth, &textHeight);
+        if (panelFont) {
+            TTF_SizeUTF8(
+                panelFont,
+                labels[i],
+                &textWidth,
+                &textHeight
+            );
 
-	  drawText(
-		   labels[i],
-		   x + (width - textWidth) / 2,
-		   y + (42 - textHeight) / 2,
-		   {230, 230, 220, 255}
-		   );
-	}	
+            drawText(
+                labels[i],
+                x + (width - textWidth) / 2,
+                y + (42 - textHeight) / 2,
+                {230, 230, 220, 255}
+            );
+        }
+    }
+
+    // Play / Stop button.
+    const char* transportLabel =
+        patternData.running ? "STOP" : "PLAY";
+
+    SDL_SetRenderDrawColor(
+        renderer, 65, 65, 65, 255
+    );
+
+    SDL_Rect transportButton{790, y, 95, 42};
+    SDL_RenderFillRect(renderer, &transportButton);
+
+    int textWidth = 0;
+    int textHeight = 0;
+
+    if (panelFont) {
+        TTF_SizeUTF8(
+            panelFont,
+            transportLabel,
+            &textWidth,
+            &textHeight
+        );
+
+        drawText(
+            transportLabel,
+            790 + (95 - textWidth) / 2,
+            y + (42 - textHeight) / 2,
+            {230, 230, 220, 255}
+        );
     }
 }
 
 void UI::renderStepButtons() {
 
-  const int count = 16;
+    const int count = 16;
     const int buttonSize = 38;
     const int spacing = 51;
     const int startX = 45;
     const int y = 690;
 
     for (int i = 0; i < count; ++i) {
+
         int x = startX + i * spacing;
 
-        // LED.
+        int absoluteStep =
+            selectedBank * 16 + i;
+
+        bool active = false;
+        bool playing = false;
+
+        if (patternDataValid) {
+
+            active =
+                (patternData.steps &
+                 (uint64_t{1} << absoluteStep)) != 0;
+
+            playing =
+                patternData.running &&
+                patternData.playingStep == absoluteStep;
+        }
+
+        SDL_Color ledColor{45, 45, 45, 255};
+
+        if (active) {
+            ledColor = {20, 150, 65, 255};
+        }
+
+        if (playing) {
+            ledColor = {90, 255, 120, 255};
+        }
+
         SDL_SetRenderDrawColor(
             renderer,
-            i == 0 ? 240 : 45,
-            i == 0 ? 190 : 45,
-            45,
-            255
+            ledColor.r,
+            ledColor.g,
+            ledColor.b,
+            ledColor.a
         );
 
-        SDL_Rect led{x + 13, y - 13, 12, 7};
+        SDL_Rect led{x + 10, y - 13, 18, 7};
         SDL_RenderFillRect(renderer, &led);
 
-        // Button.
-        SDL_SetRenderDrawColor(renderer, 75, 75, 75, 255);
+        // Button body.
+        SDL_SetRenderDrawColor(
+            renderer, 75, 75, 75, 255
+        );
+
         SDL_Rect button{x, y, buttonSize, buttonSize};
         SDL_RenderFillRect(renderer, &button);
+
+        // Step number.
+        char label[4];
+        std::snprintf(
+            label, sizeof(label), "%d", i + 1
+        );
+
+        int textWidth = 0;
+        int textHeight = 0;
+
+        if (panelFont) {
+            TTF_SizeUTF8(
+                panelFont, label,
+                &textWidth, &textHeight
+            );
+
+            drawText(
+                label,
+                x + (buttonSize - textWidth) / 2,
+                y + (buttonSize - textHeight) / 2,
+                {230, 230, 220, 255}
+            );
+        }
     }
 }
 
@@ -498,4 +610,82 @@ void UI::updateOLEDContent() {
     std::snprintf(buffer, sizeof(buffer), "%.2f",
                   displayData.resonance);
     oledDrawString(buffer, 50, 87);
+}
+
+void UI::setPatternDisplayData(
+    const PatternDisplayData& data
+) {
+    patternData = data;
+    patternDataValid = true;
+}
+
+void UI::setPatternStepCallback(
+    std::function<void(int, int)> callback
+) {
+    patternStepCallback = std::move(callback);
+}
+
+void UI::setTransportCallback(
+    std::function<void(bool)> callback
+) {
+    transportCallback = std::move(callback);
+}
+
+void UI::handleMouseClick(int x, int y) {
+
+    // Function buttons.
+    if (y >= 610 && y <= 652) {
+
+        const int width = 95;
+        const int spacing = 115;
+        const int startX = 100;
+
+        for (int i = 1; i <= 4; ++i) {
+            int buttonX = startX + i * spacing;
+
+            if (x >= buttonX && x < buttonX + width) {
+                selectedBank = i - 1;
+                return;
+            }
+        }
+
+        // Play / Stop button.
+        if (x >= 790 && x < 885) {
+            if (transportCallback) {
+                bool start = !patternData.running;
+                transportCallback(start);
+            }
+            return;
+        }
+    }
+
+    // Pattern step buttons.
+    if (y >= 690 && y <= 728) {
+
+        const int buttonSize = 38;
+        const int spacing = 51;
+        const int startX = 45;
+
+        for (int i = 0; i < 16; ++i) {
+            int buttonX = startX + i * spacing;
+
+            if (x >= buttonX &&
+                x < buttonX + buttonSize) {
+
+                int absoluteStep =
+                    selectedBank * 16 + i;
+
+                if (patternStepCallback &&
+                    patternDataValid) {
+
+                    patternStepCallback(
+                        patternData.instrument,
+                        absoluteStep
+                    );
+                }
+
+                return;
+            }
+        }
+    }
 }

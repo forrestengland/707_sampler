@@ -71,7 +71,7 @@ enum class EventType : uint8_t {
     Tune,
     Cutoff,
     Resonance,
-
+    TogglePatternStep,
     PatternStep,
     LastStep,
     Tempo,
@@ -334,6 +334,20 @@ public:
       });
   }
 
+  bool togglePatternStep(int instrument, int step) {
+    if (instrument < 0 || instrument >= NUM_INSTRUMENTS ||
+        step < 0 || step >= MAX_PATTERN_STEPS) {
+      return false;
+    }
+
+    return queue.push({
+        EventType::TogglePatternStep,
+        instrument,
+        0.0f,
+        step
+      });
+  }  
+
   bool setLastStep(int step) {
     if (step < 1 || step > MAX_PATTERN_STEPS)
       return false;
@@ -362,6 +376,31 @@ public:
     return queue.push({
         EventType::StopSequencer, 0, 0.0f
       });
+  }
+
+  bool getPatternDisplayState(
+			      int& instrument,
+			      uint64_t& steps,
+			      int& playingStep,
+			      bool& running
+			      ) const {
+    instrument = displaySelectedInstrument.load(
+						std::memory_order_acquire
+						);
+
+    steps = displayPatternSteps.load(
+				     std::memory_order_relaxed
+				     );
+
+    playingStep = displayPlayingStep.load(
+					  std::memory_order_relaxed
+					  );
+
+    running = displaySequencerRunning.load(
+					   std::memory_order_relaxed
+					   );
+
+    return true;
   }  
 
 private:
@@ -408,7 +447,14 @@ private:
 
   std::atomic<int> displaySelectedInstrument{0};
 
+  std::atomic<uint64_t> displayPatternSteps{0};
+  std::atomic<int> displayPlayingStep{-1};
+  std::atomic<bool> displaySequencerRunning{false};
+
+  int playingStep = -1; 
+
   void publishDisplayState() {
+
     for (int i = 0; i < NUM_INSTRUMENTS; ++i) {
       const auto& source = params[i];
       auto& destination = displayParams[i];
@@ -420,6 +466,29 @@ private:
       destination.cutoff.store(source.cutoff, std::memory_order_relaxed);
       destination.resonance.store(source.resonance, std::memory_order_relaxed);
     }
+
+    uint64_t stepMask = 0;
+
+    for (int s = 0; s < MAX_PATTERN_STEPS; ++s) {
+      if (pattern.steps[selectedInstrument][s]) {
+        stepMask |= (uint64_t{1} << s);
+      }
+    }
+
+    displayPatternSteps.store(
+			      stepMask,
+			      std::memory_order_relaxed
+			      );
+
+    displayPlayingStep.store(
+			     sequencerRunning ? playingStep : -1,
+			     std::memory_order_relaxed
+			     );
+
+    displaySequencerRunning.store(
+				  sequencerRunning,
+				  std::memory_order_relaxed
+				  );
 
     displaySelectedInstrument.store(
 				    selectedInstrument,
@@ -450,6 +519,7 @@ private:
 	continue;
 
       case EventType::StartSequencer:
+	playingStep = -1;
 	currentStep = 0;
 	framesUntilStep = 0.0;
 	sequencerRunning = true;
@@ -458,6 +528,7 @@ private:
       case EventType::StopSequencer:
 	sequencerRunning = false;
 	currentStep = 0;
+	playingStep = -1;		
 	continue;
 
       case EventType::LastStep:
@@ -496,7 +567,13 @@ private:
 	    event.value != 0.0f;
 	}
 	break;
-
+      case EventType::TogglePatternStep:
+	if (event.step >= 0 &&
+	    event.step < MAX_PATTERN_STEPS) {
+	  pattern.steps[i][event.step] =
+            !pattern.steps[i][event.step];
+	}
+	break;
       case EventType::Level:
 	p.level = std::clamp(event.value, 0.0f, 1.0f);
 	break;
@@ -623,28 +700,27 @@ private:
       // Sequencer clock: one step per sixteenth note.
       if (sequencerRunning && framesUntilStep <= 0.0) {
 
-	// Trigger every instrument active on this step.
+	playingStep = currentStep;
+
 	for (int i = 0; i < NUM_INSTRUMENTS; ++i) {
 	  if (pattern.steps[i][currentStep]) {
             startVoice(i);
 	  }
 	}
 
-	// Advance to the next step.
 	currentStep++;
 
 	if (currentStep >= pattern.lastStep) {
 	  currentStep = 0;
 	}
 
-	// Sixteenth-note duration in audio frames.
 	double framesPerStep =
 	  static_cast<double>(sampleRate) * 60.0 /
 	  (static_cast<double>(bpm) * 4.0);
 
 	framesUntilStep += framesPerStep;
-      }      
-
+      }
+      
       // Process MIDI events at their actual frame position.
       while (midiIndex < midiCount) {
 	
@@ -801,49 +877,78 @@ private:
 };
 
 int main(int argc, char** argv) {
-    AudioEngine engine;
 
-    // Load samples before starting JACK.
-    for (int i = 1; i + 1 < argc; i += 2) {
-        int slot = std::atoi(argv[i]);
+  AudioEngine engine;
 
-        if (!engine.loadSample(slot, argv[i + 1])) {
-            return 1;
-        }
+  // Load samples before starting JACK.
+  for (int i = 1; i + 1 < argc; i += 2) {
+    int slot = std::atoi(argv[i]);
+
+    if (!engine.loadSample(slot, argv[i + 1])) {
+      return 1;
     }
+  }
 
-    if (!engine.start()) {
-        return 1;
-    }
+  if (!engine.start()) {
+    return 1;
+  }
 
-    UI ui;
+  UI ui;
 
-    if (!ui.init()) {
-        engine.stop();
-        return 1;
-    }
-
-    ui.run([&]() {
-        int instrument;
-        InstrumentParams params;
-
-        if (engine.getDisplayState(instrument, params)) {
-            InstrumentDisplayData data;
-
-            data.instrument = instrument;
-            data.level = params.level;
-            data.attack = params.attack;
-            data.decay = params.decay;
-            data.tune = params.tune;
-            data.cutoff = params.cutoff;
-            data.resonance = params.resonance;
-
-            ui.setInstrumentDisplayData(data);
-        }
-    });
-
-    ui.shutdown();
+  if (!ui.init()) {
     engine.stop();
+    return 1;
+  }
 
-    return 0;
+  ui.setPatternStepCallback(
+			    [&](int instrument, int step) {
+			      engine.togglePatternStep(instrument, step);
+			    }
+			    );
+
+  ui.setTransportCallback(
+			  [&](bool start) {
+			    if (start) {
+			      engine.startSequencer();
+			    } else {
+			      engine.stopSequencer();
+			    }
+			  }
+			  );    
+
+  ui.run([&]() {
+    int instrument;
+    InstrumentParams params;
+
+    if (engine.getDisplayState(instrument, params)) {
+      InstrumentDisplayData data;
+      data.instrument = instrument;
+      data.level = params.level;
+      data.attack = params.attack;
+      data.decay = params.decay;
+      data.tune = params.tune;
+      data.cutoff = params.cutoff;
+      data.resonance = params.resonance;
+      ui.setInstrumentDisplayData(data);
+    }
+
+    uint64_t steps;
+    int playingStep;
+    bool running;
+
+    if (engine.getPatternDisplayState(instrument, steps,
+                                      playingStep, running)) {
+      PatternDisplayData data;
+      data.instrument = instrument;
+      data.steps = steps;
+      data.playingStep = playingStep;
+      data.running = running;
+      ui.setPatternDisplayData(data);
+    }
+  });
+
+  ui.shutdown();
+  engine.stop();
+
+  return 0;
 }

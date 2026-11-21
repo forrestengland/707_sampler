@@ -6,6 +6,14 @@
 #include <array>
 #include <string>
 #include <functional>
+#include <cstdint>
+
+struct PatternDisplayData {
+    int instrument = 0;
+    uint64_t steps = 0;
+    int playingStep = -1;
+    bool running = false;
+};
 
 namespace {
 
@@ -97,7 +105,15 @@ public:
     void run(const std::function<void()>& update = {});    
     void shutdown();
     void setInstrumentDisplayData(const InstrumentDisplayData& data);    
+    void setPatternDisplayData(const PatternDisplayData& data);
+    void setPatternStepCallback(
+				std::function<void(int, int)> callback
+				);
 
+    void setTransportCallback(
+			      std::function<void(bool)> callback
+			      );    
+    
 private:
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;    
@@ -117,6 +133,16 @@ private:
 
     InstrumentDisplayData displayData;
     bool displayDataValid = false;
+
+    PatternDisplayData patternData;
+    bool patternDataValid = false;
+
+    int selectedBank = 0;
+
+    std::function<void(int, int)> patternStepCallback;
+    std::function<void(bool)> transportCallback;
+
+    void handleMouseClick(int x, int y);    
 
     void updateOLEDContent();
 
