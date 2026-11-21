@@ -19,7 +19,7 @@ constexpr int NUM_INSTRUMENTS = 16;
 constexpr int MAX_VOICES = 64;
 constexpr int QUEUE_SIZE = 256;
 
-constexpr int MIDI_BASE_NOTE = 36;
+constexpr int MIDI_BASE_NOTE = 30;
 constexpr int MIDI_NOTE_COUNT = 16;
 
 struct Sample {
@@ -29,14 +29,28 @@ struct Sample {
   int sampleRate = 0;
 };
 
+struct InstrumentParams {
+    float level = 1.0f;
+    float attack = 0.0f;
+    float decay = 0.5f;
+    float tune = 0.0f;       // Semitones
+    float cutoff = 20000.0f;
+    float resonance = 0.0f;  // 0-1
+};
+
 struct Instrument {
   Sample sample;
 };
 
 enum class EventType : uint8_t {
-  Trigger,
-  Volume,
-  Pitch
+    Trigger,
+    Select,
+    Level,
+    Attack,
+    Decay,
+    Tune,
+    Cutoff,
+    Resonance
 };
 
 struct Event {
@@ -93,14 +107,22 @@ private:
 };
 
 struct Voice {
+
   const Sample* sample = nullptr;
 
-  double position = 0.0;
-  double increment = 1.0;
+    int instrument = 0;
 
-  float volume = 1.0f;
+    double position = 0.0;
+    double increment = 1.0;
 
-  bool active = false;
+    float volume = 1.0f;
+    float elapsed = 0.0f;
+
+    // State-variable filter memory
+    float ic1 = 0.0f;
+    float ic2 = 0.0f;
+
+    bool active = false;
 };
 
 class AudioEngine {
@@ -241,21 +263,15 @@ public:
       });
   }
 
-  bool setVolume(int instrument, float value) {
+  bool selectInstrument(int instrument) {
     return queue.push({
-	EventType::Volume,
-	instrument,
-	value
+        EventType::Select, instrument, 0.0f
       });
   }
 
-  bool setPitch(int instrument, float value) {
-    return queue.push({
-	EventType::Pitch,
-	instrument,
-	value
-      });
-  }
+  bool setParameter(EventType type, int instrument, float value) {
+    return queue.push({type, instrument, value});
+  }  
 
 private:
   jack_client_t* client = nullptr;
@@ -266,6 +282,9 @@ private:
   jack_port_t* midiInputPort = nullptr;  
 
   uint32_t sampleRate = 44100;
+
+  std::array<InstrumentParams, NUM_INSTRUMENTS> params;
+  int selectedInstrument = 0;
 
   std::array<Instrument, NUM_INSTRUMENTS> instruments;
   std::array<Voice, MAX_VOICES> voices;
@@ -296,39 +315,61 @@ private:
     Event event;
 
     while (queue.pop(event)) {
-      int index = event.instrument;
-
-      if (index < 0 ||
-	  index >= NUM_INSTRUMENTS) {
+      if (event.type == EventType::Select) {
+	if (event.instrument >= 0 &&
+	    event.instrument < NUM_INSTRUMENTS) {
+	  selectedInstrument = event.instrument;
+	}
 	continue;
       }
 
+      int i = event.instrument;
+
+      if (i < 0 || i >= NUM_INSTRUMENTS)
+	continue;
+
+      auto& p = params[i];
+
       switch (event.type) {
       case EventType::Trigger:
-	startVoice(index);
+	startVoice(i);
 	break;
 
-      case EventType::Volume:
-	volumes[index] = std::clamp(
-				    event.value, 0.0f, 2.0f);
+      case EventType::Level:
+	p.level = std::clamp(event.value, 0.0f, 1.0f);
 	break;
 
-      case EventType::Pitch:
-	pitches[index] = std::clamp(
-				    event.value, 0.25f, 4.0f);
+      case EventType::Attack:
+	p.attack = std::clamp(event.value, 0.0f, 0.5f);
+	break;
+
+      case EventType::Decay:
+	p.decay = std::clamp(event.value, 0.005f, 5.0f);
+	break;
+
+      case EventType::Tune:
+	p.tune = std::clamp(event.value, -24.0f, 24.0f);
+	break;
+
+      case EventType::Cutoff:
+	p.cutoff = std::clamp(event.value, 100.0f, 20000.0f);
+	break;
+
+      case EventType::Resonance:
+	p.resonance = std::clamp(event.value, 0.0f, 1.0f);
+	break;
+
+      default:
 	break;
       }
     }
-  }
-  
+  }  
+
   void startVoice(int instrument, float velocity = 1.0f) {
+    const Sample& sample = instruments[instrument].sample;
 
-    const Sample& sample =
-      instruments[instrument].sample;
-
-    if (sample.frames == 0) {
+    if (sample.frames == 0)
       return;
-    }
 
     Voice* selected = nullptr;
 
@@ -339,32 +380,66 @@ private:
       }
     }
 
-    // Steal the oldest voice if necessary.
-    if (!selected) {
+    if (!selected)
       selected = &voices[0];
-    }
+
+    const auto& p = params[instrument];
 
     selected->sample = &sample;
+    selected->instrument = instrument;
     selected->position = 0.0;
-
+    selected->elapsed = 0.0f;
     selected->increment =
-      (static_cast<double>(sample.sampleRate) /
-       sampleRate) * pitches[instrument];
+      (static_cast<double>(sample.sampleRate) / sampleRate) *
+      std::pow(2.0, p.tune / 12.0);
 
-    selected->volume =
-      volumes[instrument] * velocity;  
+    selected->volume = p.level * velocity;
+
+    selected->ic1 = 0.0f;
+    selected->ic2 = 0.0f;
     selected->active = true;
   }
 
+  void handleMidiCC(uint8_t cc, uint8_t value) {
+    float v = value / 127.0f;
+    int i = selectedInstrument;
+
+    switch (cc) {
+    case 7: // Level
+      params[i].level = v;
+      break;
+
+    case 12: // Decay, logarithmic
+      params[i].decay =
+	0.005f * std::pow(1000.0f, v);
+      break;
+
+    case 13: // Tune
+      params[i].tune = -24.0f + v * 48.0f;
+      break;
+
+    case 14: // Cutoff, logarithmic
+      params[i].cutoff =
+	100.0f * std::pow(200.0f, v);
+      break;
+
+    case 15: // Resonance
+      params[i].resonance = v;
+      break;
+
+    case 1: // Modulation wheel: Attack
+      params[i].attack = v * 0.5f;
+      break;
+    }
+  }  
+
   int process(jack_nframes_t nframes) {
-    float* outL = static_cast<float*>(
-				      jack_port_get_buffer(leftPort, nframes));
 
-    float* outR = static_cast<float*>(
-				      jack_port_get_buffer(rightPort, nframes));
+    float* outL = static_cast<float*>(jack_port_get_buffer(leftPort, nframes));
 
-    void* midiBuffer =
-      jack_port_get_buffer(midiInputPort, nframes);
+    float* outR = static_cast<float*>(jack_port_get_buffer(rightPort, nframes));
+
+    void* midiBuffer = jack_port_get_buffer(midiInputPort, nframes);
 
     std::fill(outL, outL + nframes, 0.0f);
     std::fill(outR, outR + nframes, 0.0f);
@@ -384,10 +459,10 @@ private:
 
       // Process MIDI events at their actual frame position.
       while (midiIndex < midiCount) {
+	
 	jack_midi_event_t event{};
 
-	if (jack_midi_event_get(
-				&event, midiBuffer, midiIndex) != 0) {
+	if (jack_midi_event_get(&event, midiBuffer, midiIndex) != 0) {
 	  break;
 	}
 
@@ -402,24 +477,18 @@ private:
 	  uint8_t note = data[1];
 	  uint8_t velocity = data[2];
 
-	  // MIDI note-on.
-	  if (status == 0x90 && velocity > 0) {
-	    int instrument =
-	      static_cast<int>(note) -
-	      MIDI_BASE_NOTE;
+	  if (status == 0x90 && data[2] > 0) {
+	    int instrument = data[1] - MIDI_BASE_NOTE;
 
-	    if (instrument >= 0 &&
-		instrument < MIDI_NOTE_COUNT) {
+	    if (instrument >= 0 && instrument < NUM_INSTRUMENTS) {
+	      selectedInstrument = instrument;
 
-	      float normalizedVelocity =
-		velocity / 127.0f;
-
-	      startVoice(
-			 instrument,
-			 normalizedVelocity
-			 );
+	      float velocity = data[2] / 127.0f;
+	      startVoice(instrument, velocity);
 	    }
-	  }
+	  } else if (status == 0xB0) {
+	    handleMidiCC(data[1], data[2]);
+	  }	  
 	}
 
 	++midiIndex;
@@ -427,6 +496,7 @@ private:
 
       // Mix all active voices.
       for (auto& voice : voices) {
+
 	if (!voice.active || !voice.sample) {
 	  continue;
 	}
@@ -462,16 +532,65 @@ private:
 	    * fraction;
 	};
 
-	float left = interpolate(0);
+	const auto& p = params[voice.instrument];
 
-	float right = sample.channels == 2
+	float inputL = interpolate(0);
+	float inputR = sample.channels == 2
 	  ? interpolate(1)
-	  : left;
+	  : inputL;
 
-	outL[frame] += left * voice.volume;
-	outR[frame] += right * voice.volume;
+	// Envelope
+	float envelope = 1.0f;
+
+	if (p.attack > 0.0001f &&
+	    voice.elapsed < p.attack) {
+
+	  envelope = voice.elapsed / p.attack;
+	}
+
+	float decayTime = std::max(0.005f, p.decay);
+
+	float decayElapsed = std::max(0.0f, voice.elapsed - p.attack);
+
+	envelope *= std::exp(-5.0f * decayElapsed / decayTime);
+
+	// State-variable low-pass filter
+	float cutoff = std::clamp(p.cutoff,
+				  100.0f,
+				  static_cast<float>(sampleRate) * 0.45f);
+
+	float g = std::tan(3.14159265f * cutoff / sampleRate);
+
+	float q = 0.707f + p.resonance * 11.3f;
+	float k = 1.0f / q;
+
+	float a1 = 1.0f / (1.0f + g * (g + k));
+	float a2 = g * a1;
+	float a3 = g * a2;
+
+	auto filter = [&](float input) {
+
+	  float v3 = input - voice.ic2;
+	  float v1 = a1 * voice.ic1 + a2 * v3;
+	  float v2 = voice.ic2 + a2 * voice.ic1 + a3 * v3;
+
+	  voice.ic1 = 2.0f * v1 - voice.ic1;
+	  voice.ic2 = 2.0f * v2 - voice.ic2;
+
+	  return v2;
+	};
+
+	float filteredL = filter(inputL);
+	float filteredR = sample.channels == 2
+	  ? filter(inputR)
+	  : filteredL;
+
+	outL[frame] += filteredL * voice.volume * envelope;
+	outR[frame] += filteredR * voice.volume * envelope;
 
 	voice.position += voice.increment;
+	voice.elapsed += 1.0f / sampleRate;	
+
       }
     }
 
@@ -522,25 +641,40 @@ int main(int argc, char** argv) {
       break;
     }
 
-    if (command == "hit") {
-      if (input >> instrument) {
-	if (!engine.trigger(instrument)) {
-	  std::cerr << "Event queue full\n";
-	}
-      }
+    else if (command == "hit") {
+      if (input >> instrument)
+        engine.trigger(instrument);
     }
 
-    else if (command == "vol") {
-      if (input >> instrument >> value) {
-	engine.setVolume(instrument, value);
-      }
+    else if (command == "select") {
+      if (input >> instrument)
+        engine.selectInstrument(instrument);
     }
 
-    else if (command == "pitch") {
-      if (input >> instrument >> value) {
-	engine.setPitch(instrument, value);
-      }
-    }
+    else {
+      if (!(input >> instrument >> value))
+        continue;
+
+      EventType type;
+
+      if (command == "level")
+        type = EventType::Level;
+      else if (command == "attack")
+        type = EventType::Attack;
+      else if (command == "decay")
+        type = EventType::Decay;
+      else if (command == "tune")
+        type = EventType::Tune;
+      else if (command == "cutoff")
+        type = EventType::Cutoff;
+      else if (command == "resonance")
+        type = EventType::Resonance;
+      else
+        continue;
+
+      engine.setParameter(type, instrument, value);
+    }    
+
   }
 
   engine.stop();
