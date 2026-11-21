@@ -11,9 +11,22 @@ UI::~UI() {
 }
 
 bool UI::init() {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+
+  if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         return false;
     }
+
+  if (TTF_Init() != 0) {
+    return false;
+  }
+
+  panelFont = TTF_OpenFont("fonts/data-latin.ttf",
+			   16);
+
+  if (!panelFont) {
+    SDL_Log("Could not load font: %s", TTF_GetError());
+    return false;
+  }  
 
     window = SDL_CreateWindow(
         "Drum Machine",
@@ -80,13 +93,39 @@ void UI::drawText(
     int y,
     SDL_Color color
 ) {
-    // Temporary text placeholder.
-    // We'll add a small bitmap font for the OLED next.
-    (void)text;
-    (void)x;
-    (void)y;
-    (void)color;
-}
+    if (!panelFont) {
+        return;
+    }
+
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(
+        panelFont,
+        text.c_str(),
+        color
+    );
+
+    if (!surface) {
+        return;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(
+        renderer,
+        surface
+    );
+
+    if (texture) {
+        SDL_Rect destination{
+            x,
+            y,
+            surface->w,
+            surface->h
+        };
+
+        SDL_RenderCopy(renderer, texture, nullptr, &destination);
+        SDL_DestroyTexture(texture);
+    }
+
+    SDL_FreeSurface(surface);
+}  
 
 void UI::renderEncoders() {
 
@@ -219,6 +258,20 @@ void UI::renderFunctionButtons() {
         SDL_SetRenderDrawColor(renderer, 65, 65, 65, 255);
         SDL_Rect button{x, y, width, 42};
         SDL_RenderFillRect(renderer, &button);
+
+	int textWidth = 0;
+	int textHeight = 0;
+
+	if (panelFont) {
+	  TTF_SizeUTF8(panelFont, labels[i], &textWidth, &textHeight);
+
+	  drawText(
+		   labels[i],
+		   x + (width - textWidth) / 2,
+		   y + (42 - textHeight) / 2,
+		   {230, 230, 220, 255}
+		   );
+	}	
     }
 }
 

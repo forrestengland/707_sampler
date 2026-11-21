@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 
 #include <array>
 #include <string>
@@ -16,7 +17,7 @@ public:
 
 private:
     SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;
+    SDL_Renderer* renderer = nullptr;    
 
     bool running = false;
 
@@ -26,6 +27,9 @@ private:
     static constexpr int OLED_SIZE = 128;
     static constexpr int OLED_SCALE = 3;
 
+    TTF_Font* panelFont = nullptr;
+
+    bool loadFonts();
     void handleEvents();
     void render();
     void renderEncoders();
