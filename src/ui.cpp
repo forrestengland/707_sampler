@@ -224,8 +224,19 @@ void UI::renderOLED() {
     };
     SDL_RenderFillRect(renderer, &screen);
 
+    clearOLED();
+
+    oledDrawString("DRUM MACHINE", 8, 8);
+    oledDrawString("INSTRUMENT 01", 8, 25);
+    oledDrawString("LEVEL: 100%", 8, 43);
+    oledDrawString("TUNE:  64", 8, 61);
+    oledDrawString("CUTOFF: 90", 8, 79);
+    oledDrawString("DECAY:  72", 8, 97);
+
+    renderOLEDBuffer(x, y);    
+
     // Temporary OLED content.
-    SDL_SetRenderDrawColor(renderer, 80, 220, 120, 255);
+/*    SDL_SetRenderDrawColor(renderer, 80, 220, 120, 255);
 
     SDL_Rect border{
         x + 8,
@@ -233,7 +244,7 @@ void UI::renderOLED() {
         OLED_SIZE * OLED_SCALE - 16,
         OLED_SIZE * OLED_SCALE - 16
     };
-    SDL_RenderDrawRect(renderer, &border);
+    SDL_RenderDrawRect(renderer, &border); */
 }
 
 void UI::renderFunctionButtons() {
@@ -347,3 +358,80 @@ void UI::drawFilledCircle(
     }
 }
 
+void UI::clearOLED() {
+    oledPixels.fill(0);
+}
+
+void UI::oledSetPixel(int x, int y, bool on) {
+    if (x < 0 || x >= OLED_SIZE ||
+        y < 0 || y >= OLED_SIZE) {
+        return;
+    }
+
+    oledPixels[y * OLED_SIZE + x] = on ? 1 : 0;
+}
+
+void UI::oledDrawChar(char c, int x, int y) {
+    const Glyph* glyph = findGlyph(c);
+
+    if (!glyph) {
+        return;
+    }
+
+    for (int col = 0; col < 5; ++col) {
+        for (int row = 0; row < 7; ++row) {
+            bool pixel = glyph->columns[col] & (1 << row);
+
+            if (pixel) {
+                oledSetPixel(x + col, y + row);
+            }
+        }
+    }
+}
+
+void UI::oledDrawString(
+    const std::string& text,
+    int x,
+    int y
+) {
+    int cursorX = x;
+
+    for (char c : text) {
+        if (c == '\n') {
+            cursorX = x;
+            y += 9;
+            continue;
+        }
+
+        if (c != ' ') {
+            oledDrawChar(c, cursorX, y);
+        }
+
+        cursorX += 6;
+    }
+}
+
+void UI::renderOLEDBuffer(int startx, int starty) {
+
+  SDL_SetRenderDrawColor(
+        renderer,
+        80, 220, 120, 255
+    );
+
+    const int scale = OLED_SCALE;
+
+    for (int y = 0; y < OLED_SIZE; ++y) {
+        for (int x = 0; x < OLED_SIZE; ++x) {
+            if (oledPixels[y * OLED_SIZE + x]) {
+                SDL_Rect pixel{
+                    startx + x * scale,
+                    starty + y * scale,
+                    scale,
+                    scale
+                };
+
+                SDL_RenderFillRect(renderer, &pixel);
+            }
+        }
+    }
+}
