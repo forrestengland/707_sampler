@@ -22,6 +22,15 @@ constexpr int QUEUE_SIZE = 256;
 constexpr int MIDI_BASE_NOTE = 30;
 constexpr int MIDI_NOTE_COUNT = 16;
 
+constexpr int MAX_PATTERN_STEPS = 64;
+constexpr int NUM_BANKS = 4;
+constexpr int STEPS_PER_BANK = 16;
+
+struct Pattern {
+    bool steps[NUM_INSTRUMENTS][MAX_PATTERN_STEPS] = {};
+    int lastStep = 16;
+};
+
 struct Sample {
   std::vector<float> data;
   uint64_t frames = 0;
@@ -605,7 +614,11 @@ private:
 };
 
 int main(int argc, char** argv) {
+  
   AudioEngine engine;
+
+  Pattern pattern;
+  int selectedBank = 0;  // 0-3  
 
   // Load samples before starting JACK.
   for (int i = 1; i + 1 < argc; i += 2) {
@@ -622,9 +635,18 @@ int main(int argc, char** argv) {
 
   std::cout << "\nCommands:\n"
 	    << " hit <instrument>\n"
-	    << " vol <instrument> <0.0-2.0>\n"
-	    << " pitch <instrument> <0.25-4.0>\n"
-	    << " quit\n\n";
+	    << " select <instrument>\n"
+	    << " level <instrument> <0.0-1.0>\n"
+	    << " attack <instrument> <0.0-0.5>\n"
+	    << " decay <instrument> <0.005-5.0>\n"
+	    << " tune <instrument> <-24 to 24>\n"
+	    << " cutoff <instrument> <100-20000>\n"
+	    << " resonance <instrument> <0.0-1.0>\n"
+	    << " bank <1-4>\n"
+	    << " laststep <1-64>\n"
+	    << " step <instrument> <step 1-16> <0|1>\n"
+	    << " show\n"
+	    << " quit\n\n";  
 
   std::string line;
 
@@ -649,6 +671,99 @@ int main(int argc, char** argv) {
     else if (command == "select") {
       if (input >> instrument)
         engine.selectInstrument(instrument);
+    } else if (command == "bank") {
+
+      int bank;
+
+      if (input >> bank) {
+        if (bank < 1 || bank > NUM_BANKS) {
+	  std::cout << "Bank must be 1-4.\n";
+        } else {
+	  selectedBank = bank - 1;
+
+	  int firstStep = selectedBank * STEPS_PER_BANK + 1;
+	  int lastBankStep = firstStep + STEPS_PER_BANK - 1;
+
+	  std::cout << "Selected bank " << bank
+		    << " (steps " << firstStep
+		    << "-" << lastBankStep << ")\n";
+        }
+      }
+    }
+
+    else if (command == "laststep") {
+      int length;
+
+      if (input >> length) {
+        if (length < 1 || length > MAX_PATTERN_STEPS) {
+	  std::cout << "Pattern length must be 1-64.\n";
+        } else {
+	  pattern.lastStep = length;
+
+	  std::cout << "Pattern length set to "
+		    << pattern.lastStep << " steps.\n";
+        }
+      }
+    }
+
+    else if (command == "step") {
+      int instrument;
+      int localStep;
+      int enabled;
+
+      if (input >> instrument >> localStep >> enabled) {
+        if (instrument < 0 || instrument >= NUM_INSTRUMENTS) {
+	  std::cout << "Instrument must be 0-15.\n";
+        }
+        else if (localStep < 1 || localStep > STEPS_PER_BANK) {
+	  std::cout << "Step must be 1-16 within the selected bank.\n";
+        }
+        else if (enabled != 0 && enabled != 1) {
+	  std::cout << "Step value must be 0 or 1.\n";
+        }
+        else {
+	  int absoluteStep =
+	    selectedBank * STEPS_PER_BANK + localStep - 1;
+
+	  pattern.steps[instrument][absoluteStep] = (enabled != 0);
+
+	  std::cout << "Instrument " << instrument
+		    << ", step " << absoluteStep + 1
+		    << " set to " << enabled << ".\n";
+        }
+      }
+    }
+
+    else if (command == "show") {
+      std::cout << "\nPattern length: "
+		<< pattern.lastStep << " steps\n";
+
+      std::cout << "Selected bank: "
+		<< selectedBank + 1 << "\n\n";
+
+      std::cout << "Instrument ";
+
+      for (int s = 0; s < STEPS_PER_BANK; ++s) {
+        std::cout << (s + 1) % 10;
+      }
+
+      std::cout << "\n";
+
+      int firstStep = selectedBank * STEPS_PER_BANK;
+
+      for (int i = 0; i < NUM_INSTRUMENTS; ++i) {
+        std::cout << "     " << i << "      ";
+
+        for (int s = 0; s < STEPS_PER_BANK; ++s) {
+	  int absoluteStep = firstStep + s;
+
+	  std::cout << (pattern.steps[i][absoluteStep] ? "X" : ".");
+        }
+
+        std::cout << "\n";
+      }
+
+      std::cout << "\n";
     }
 
     else {
