@@ -59,13 +59,20 @@ enum class EventType : uint8_t {
     Decay,
     Tune,
     Cutoff,
-    Resonance
+    Resonance,
+
+    PatternStep,
+    LastStep,
+    Tempo,
+    StartSequencer,
+    StopSequencer
 };
 
 struct Event {
   EventType type;
   int instrument;
   float value;
+  int step = 0;
 };
 
 // Single-producer, single-consumer event queue.
@@ -280,6 +287,50 @@ public:
 
   bool setParameter(EventType type, int instrument, float value) {
     return queue.push({type, instrument, value});
+  }
+
+  bool setPatternStep(int instrument, int step, bool enabled) {
+    if (instrument < 0 || instrument >= NUM_INSTRUMENTS ||
+        step < 0 || step >= MAX_PATTERN_STEPS) {
+      return false;
+    }
+
+    return queue.push({
+        EventType::PatternStep,
+        instrument,
+        enabled ? 1.0f : 0.0f,
+        step
+      });
+  }
+
+  bool setLastStep(int step) {
+    if (step < 1 || step > MAX_PATTERN_STEPS)
+      return false;
+
+    return queue.push({
+        EventType::LastStep, 0, static_cast<float>(step)
+      });
+  }
+
+  bool setTempo(float bpm) {
+    if (bpm < 30.0f || bpm > 300.0f)
+      return false;
+
+    return queue.push({
+        EventType::Tempo, 0, bpm
+      });
+  }
+
+  bool startSequencer() {
+    return queue.push({
+        EventType::StartSequencer, 0, 0.0f
+      });
+  }
+
+  bool stopSequencer() {
+    return queue.push({
+        EventType::StopSequencer, 0, 0.0f
+      });
   }  
 
 private:
@@ -310,6 +361,16 @@ private:
     return a;
   }();
 
+  Pattern pattern;
+
+  float bpm = 120.0f;
+
+  bool sequencerRunning = false;
+  int currentStep = 0;
+
+  // Countdown in audio frames until the next step.
+  double framesUntilStep = 0.0;  
+
   EventQueue queue;
 
   static int processCallback(
@@ -324,12 +385,41 @@ private:
     Event event;
 
     while (queue.pop(event)) {
-      if (event.type == EventType::Select) {
+
+      switch (event.type) {
+
+      case EventType::Select:
 	if (event.instrument >= 0 &&
 	    event.instrument < NUM_INSTRUMENTS) {
 	  selectedInstrument = event.instrument;
 	}
 	continue;
+
+      case EventType::StartSequencer:
+	currentStep = 0;
+	framesUntilStep = 0.0;
+	sequencerRunning = true;
+	continue;
+
+      case EventType::StopSequencer:
+	sequencerRunning = false;
+	currentStep = 0;
+	continue;
+
+      case EventType::LastStep:
+	pattern.lastStep = static_cast<int>(event.value);
+
+	if (currentStep >= pattern.lastStep) {
+	  currentStep = 0;
+	}
+	continue;
+
+      case EventType::Tempo:
+	bpm = std::clamp(event.value, 30.0f, 300.0f);
+	continue;
+
+      default:
+	break;
       }
 
       int i = event.instrument;
@@ -340,8 +430,17 @@ private:
       auto& p = params[i];
 
       switch (event.type) {
+
       case EventType::Trigger:
 	startVoice(i);
+	break;
+
+      case EventType::PatternStep:
+	if (event.step >= 0 &&
+	    event.step < MAX_PATTERN_STEPS) {
+	  pattern.steps[i][event.step] =
+	    event.value != 0.0f;
+	}
 	break;
 
       case EventType::Level:
@@ -465,6 +564,32 @@ private:
     for (jack_nframes_t frame = 0;
 	 frame < nframes;
 	 ++frame) {
+
+      // update sequencer
+      // Sequencer clock: one step per sixteenth note.
+      if (sequencerRunning && framesUntilStep <= 0.0) {
+
+	// Trigger every instrument active on this step.
+	for (int i = 0; i < NUM_INSTRUMENTS; ++i) {
+	  if (pattern.steps[i][currentStep]) {
+            startVoice(i);
+	  }
+	}
+
+	// Advance to the next step.
+	currentStep++;
+
+	if (currentStep >= pattern.lastStep) {
+	  currentStep = 0;
+	}
+
+	// Sixteenth-note duration in audio frames.
+	double framesPerStep =
+	  static_cast<double>(sampleRate) * 60.0 /
+	  (static_cast<double>(bpm) * 4.0);
+
+	framesUntilStep += framesPerStep;
+      }      
 
       // Process MIDI events at their actual frame position.
       while (midiIndex < midiCount) {
@@ -598,9 +723,14 @@ private:
 	outR[frame] += filteredR * voice.volume * envelope;
 
 	voice.position += voice.increment;
-	voice.elapsed += 1.0f / sampleRate;	
-
+	voice.elapsed += 1.0f / sampleRate;
       }
+
+      // update sequencer step update time
+      if (sequencerRunning) {
+	framesUntilStep -= 1.0;
+      }	
+      
     }
 
     // Safety limiter.
@@ -644,8 +774,11 @@ int main(int argc, char** argv) {
 	    << " resonance <instrument> <0.0-1.0>\n"
 	    << " bank <1-4>\n"
 	    << " laststep <1-64>\n"
-	    << " step <instrument> <step 1-16> <0|1>\n"
+	    << " step <instrument> <step 1-16> <0|1>\n"    
 	    << " show\n"
+	    << " tempo <30-300>\n"
+	    << " start\n"
+	    << " stop\n"    
 	    << " quit\n\n";  
 
   std::string line;
@@ -692,13 +825,17 @@ int main(int argc, char** argv) {
     }
 
     else if (command == "laststep") {
+
       int length;
 
       if (input >> length) {
         if (length < 1 || length > MAX_PATTERN_STEPS) {
 	  std::cout << "Pattern length must be 1-64.\n";
         } else {
+
 	  pattern.lastStep = length;
+
+	  engine.setLastStep(length);	  
 
 	  std::cout << "Pattern length set to "
 		    << pattern.lastStep << " steps.\n";
@@ -726,6 +863,12 @@ int main(int argc, char** argv) {
 	    selectedBank * STEPS_PER_BANK + localStep - 1;
 
 	  pattern.steps[instrument][absoluteStep] = (enabled != 0);
+
+	  engine.setPatternStep(
+				instrument,
+				absoluteStep,
+				enabled != 0
+				);
 
 	  std::cout << "Instrument " << instrument
 		    << ", step " << absoluteStep + 1
@@ -765,7 +908,33 @@ int main(int argc, char** argv) {
 
       std::cout << "\n";
     }
+    else if (command == "tempo") {
+      float bpm;
 
+      if (input >> bpm) {
+        if (engine.setTempo(bpm)) {
+	  std::cout << "Tempo: " << bpm << " BPM\n";
+        } else {
+	  std::cout << "Tempo must be 30-300 BPM.\n";
+        }
+      }
+    }
+
+    else if (command == "start") {
+      if (engine.startSequencer()) {
+        std::cout << "Sequencer started.\n";
+      } else {
+        std::cout << "Event queue full.\n";
+      }
+    }
+
+    else if (command == "stop") {
+      if (engine.stopSequencer()) {
+        std::cout << "Sequencer stopped.\n";
+      } else {
+        std::cout << "Event queue full.\n";
+      }
+    }
     else {
       if (!(input >> instrument >> value))
         continue;
