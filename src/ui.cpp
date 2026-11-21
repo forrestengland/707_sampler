@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 UI::UI() = default;
 
@@ -70,8 +71,12 @@ void UI::shutdown() {
     SDL_Quit();
 }
 
-void UI::run() {
+void UI::run(const std::function<void()>& update) {
     while (running) {
+        if (update) {
+            update();
+        }
+
         handleEvents();
         render();
     }
@@ -224,14 +229,15 @@ void UI::renderOLED() {
     };
     SDL_RenderFillRect(renderer, &screen);
 
-    clearOLED();
+    /*    clearOLED();
 
     oledDrawString("DRUM MACHINE", 8, 8);
     oledDrawString("INSTRUMENT 01", 8, 25);
     oledDrawString("LEVEL: 100%", 8, 43);
     oledDrawString("TUNE:  64", 8, 61);
     oledDrawString("CUTOFF: 90", 8, 79);
-    oledDrawString("DECAY:  72", 8, 97);
+    oledDrawString("DECAY:  72", 8, 97); */
+    updateOLEDContent();
 
     renderOLEDBuffer(x, y);    
 
@@ -434,4 +440,62 @@ void UI::renderOLEDBuffer(int startx, int starty) {
             }
         }
     }
+}
+
+void UI::setInstrumentDisplayData(
+    const InstrumentDisplayData& data
+) {
+    displayData = data;
+    displayDataValid = true;
+}
+
+void UI::updateOLEDContent() {
+    clearOLED();
+
+    if (!displayDataValid) {
+        oledDrawString("DRUM MACHINE", 8, 8);
+        oledDrawString("WAITING...", 8, 30);
+        return;
+    }
+
+    char buffer[32];
+
+    std::snprintf(
+        buffer,
+        sizeof(buffer),
+        "INSTRUMENT %02d",
+        displayData.instrument + 1
+    );
+
+    oledDrawString(buffer, 8, 8);
+
+    oledDrawString("LEVEL", 8, 27);
+    std::snprintf(buffer, sizeof(buffer), "%.2f",
+                  displayData.level);
+    oledDrawString(buffer, 50, 27);
+
+    oledDrawString("TUNE", 8, 39);
+    std::snprintf(buffer, sizeof(buffer), "%+.1f",
+                  displayData.tune);
+    oledDrawString(buffer, 50, 39);
+
+    oledDrawString("CUTOFF", 8, 51);
+    std::snprintf(buffer, sizeof(buffer), "%.0f",
+                  displayData.cutoff);
+    oledDrawString(buffer, 50, 51);
+
+    oledDrawString("DECAY", 8, 63);
+    std::snprintf(buffer, sizeof(buffer), "%.2f",
+                  displayData.decay);
+    oledDrawString(buffer, 50, 63);
+
+    oledDrawString("ATTACK", 8, 75);
+    std::snprintf(buffer, sizeof(buffer), "%.3f",
+                  displayData.attack);
+    oledDrawString(buffer, 50, 75);
+
+    oledDrawString("RES", 8, 87);
+    std::snprintf(buffer, sizeof(buffer), "%.2f",
+                  displayData.resonance);
+    oledDrawString(buffer, 50, 87);
 }

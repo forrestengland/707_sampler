@@ -5,15 +5,16 @@
 
 #include <array>
 #include <string>
+#include <functional>
 
 namespace {
 
-struct Glyph {
+  struct Glyph {
     char character;
     uint8_t columns[5];
-};
+  };
 
-constexpr Glyph FONT5X7[] = {
+  constexpr Glyph FONT5X7[] = {
     {'A', {0x7E, 0x11, 0x11, 0x11, 0x7E}},
     {'B', {0x7F, 0x49, 0x49, 0x49, 0x36}},
     {'C', {0x3E, 0x41, 0x41, 0x41, 0x22}},
@@ -59,23 +60,33 @@ constexpr Glyph FONT5X7[] = {
     {'%', {0x63, 0x13, 0x08, 0x64, 0x63}},
     {'>', {0x00, 0x41, 0x22, 0x14, 0x08}},
     {'<', {0x08, 0x14, 0x22, 0x41, 0x00}}
-};
+  };
 
-const Glyph* findGlyph(char c) {
+  const Glyph* findGlyph(char c) {
     if (c >= 'a' && c <= 'z') {
-        c = static_cast<char>(c - 'a' + 'A');
+      c = static_cast<char>(c - 'a' + 'A');
     }
 
     for (const auto& glyph : FONT5X7) {
-        if (glyph.character == c) {
-            return &glyph;
-        }
+      if (glyph.character == c) {
+	return &glyph;
+      }
     }
 
     return nullptr;
-}
+  }
+} // end namespace
 
-}
+struct InstrumentDisplayData {
+    int instrument = 0;
+
+    float level = 0.0f;
+    float attack = 0.0f;
+    float decay = 0.0f;
+    float tune = 0.0f;
+    float cutoff = 0.0f;
+    float resonance = 0.0f;
+};
 
 class UI {
 public:
@@ -83,8 +94,9 @@ public:
     ~UI();
 
     bool init();
-    void run();
+    void run(const std::function<void()>& update = {});    
     void shutdown();
+    void setInstrumentDisplayData(const InstrumentDisplayData& data);    
 
 private:
     SDL_Window* window = nullptr;
@@ -102,6 +114,11 @@ private:
 
     // OLED framebuffer: one byte per pixel, 0 = off, 1 = on.
     std::array<uint8_t, OLED_SIZE * OLED_SIZE> oledPixels{};
+
+    InstrumentDisplayData displayData;
+    bool displayDataValid = false;
+
+    void updateOLEDContent();
 
     void clearOLED();
     void oledSetPixel(int x, int y, bool on = true);

@@ -49,6 +49,15 @@ struct InstrumentParams {
     float resonance = 0.0f;  // 0-1
 };
 
+struct AtomicInstrumentParams {
+    std::atomic<float> level{1.0f};
+    std::atomic<float> attack{0.0f};
+    std::atomic<float> decay{0.5f};
+    std::atomic<float> tune{0.0f};
+    std::atomic<float> cutoff{20000.0f};
+    std::atomic<float> resonance{0.0f};
+};
+
 struct Instrument {
   Sample sample;
 };
@@ -145,6 +154,26 @@ struct Voice {
 
 class AudioEngine {
 public:
+  bool getDisplayState(
+		       int& instrument,
+		       InstrumentParams& values
+		       ) const {
+    instrument = displaySelectedInstrument.load(
+						std::memory_order_acquire
+						);
+
+    const auto& p = displayParams[instrument];
+
+    values.level = p.level.load(std::memory_order_relaxed);
+    values.attack = p.attack.load(std::memory_order_relaxed);
+    values.decay = p.decay.load(std::memory_order_relaxed);
+    values.tune = p.tune.load(std::memory_order_relaxed);
+    values.cutoff = p.cutoff.load(std::memory_order_relaxed);
+    values.resonance = p.resonance.load(std::memory_order_relaxed);
+
+    return true;
+  }
+  
   bool loadSample(int instrument, const std::string& path) {
     if (instrument < 0 ||
 	instrument >= NUM_INSTRUMENTS) {
@@ -374,6 +403,29 @@ private:
   double framesUntilStep = 0.0;  
 
   EventQueue queue;
+
+  std::array<AtomicInstrumentParams, NUM_INSTRUMENTS> displayParams{};
+
+  std::atomic<int> displaySelectedInstrument{0};
+
+  void publishDisplayState() {
+    for (int i = 0; i < NUM_INSTRUMENTS; ++i) {
+      const auto& source = params[i];
+      auto& destination = displayParams[i];
+
+      destination.level.store(source.level, std::memory_order_relaxed);
+      destination.attack.store(source.attack, std::memory_order_relaxed);
+      destination.decay.store(source.decay, std::memory_order_relaxed);
+      destination.tune.store(source.tune, std::memory_order_relaxed);
+      destination.cutoff.store(source.cutoff, std::memory_order_relaxed);
+      destination.resonance.store(source.resonance, std::memory_order_relaxed);
+    }
+
+    displaySelectedInstrument.store(
+				    selectedInstrument,
+				    std::memory_order_release
+				    );
+  }  
 
   static int processCallback(
 			     jack_nframes_t nframes,
@@ -741,240 +793,57 @@ private:
       outR[i] = std::clamp(outR[i], -1.0f, 1.0f);
     }
 
+    // safely update instrument parameters for display
+    publishDisplayState();
+
     return 0;
   }
 };
 
-int main() {
-    UI ui;
+int main(int argc, char** argv) {
+    AudioEngine engine;
 
-    if (!ui.init()) {
+    // Load samples before starting JACK.
+    for (int i = 1; i + 1 < argc; i += 2) {
+        int slot = std::atoi(argv[i]);
+
+        if (!engine.loadSample(slot, argv[i + 1])) {
+            return 1;
+        }
+    }
+
+    if (!engine.start()) {
         return 1;
     }
 
-    ui.run();
+    UI ui;
+
+    if (!ui.init()) {
+        engine.stop();
+        return 1;
+    }
+
+    ui.run([&]() {
+        int instrument;
+        InstrumentParams params;
+
+        if (engine.getDisplayState(instrument, params)) {
+            InstrumentDisplayData data;
+
+            data.instrument = instrument;
+            data.level = params.level;
+            data.attack = params.attack;
+            data.decay = params.decay;
+            data.tune = params.tune;
+            data.cutoff = params.cutoff;
+            data.resonance = params.resonance;
+
+            ui.setInstrumentDisplayData(data);
+        }
+    });
+
+    ui.shutdown();
+    engine.stop();
+
     return 0;
 }
-
-/* int main(int argc, char** argv) {
-  
-  AudioEngine engine;
-
-  Pattern pattern;
-  int selectedBank = 0;  // 0-3  
-
-  // Load samples before starting JACK.
-  for (int i = 1; i + 1 < argc; i += 2) {
-    int slot = std::atoi(argv[i]);
-
-    if (!engine.loadSample(slot, argv[i + 1])) {
-      return 1;
-    }
-  }
-
-  if (!engine.start()) {
-    return 1;
-  }
-
-  std::cout << "\nCommands:\n"
-	    << " hit <instrument>\n"
-	    << " select <instrument>\n"
-	    << " level <instrument> <0.0-1.0>\n"
-	    << " attack <instrument> <0.0-0.5>\n"
-	    << " decay <instrument> <0.005-5.0>\n"
-	    << " tune <instrument> <-24 to 24>\n"
-	    << " cutoff <instrument> <100-20000>\n"
-	    << " resonance <instrument> <0.0-1.0>\n"
-	    << " bank <1-4>\n"
-	    << " laststep <1-64>\n"
-	    << " step <instrument> <step 1-16> <0|1>\n"    
-	    << " show\n"
-	    << " tempo <30-300>\n"
-	    << " start\n"
-	    << " stop\n"    
-	    << " quit\n\n";  
-
-  std::string line;
-
-  while (std::getline(std::cin, line)) {
-    std::istringstream input(line);
-
-    std::string command;
-    int instrument;
-    float value;
-
-    input >> command;
-
-    if (command == "quit") {
-      break;
-    }
-
-    else if (command == "hit") {
-      if (input >> instrument)
-        engine.trigger(instrument);
-    }
-
-    else if (command == "select") {
-      if (input >> instrument)
-        engine.selectInstrument(instrument);
-    } else if (command == "bank") {
-
-      int bank;
-
-      if (input >> bank) {
-        if (bank < 1 || bank > NUM_BANKS) {
-	  std::cout << "Bank must be 1-4.\n";
-        } else {
-	  selectedBank = bank - 1;
-
-	  int firstStep = selectedBank * STEPS_PER_BANK + 1;
-	  int lastBankStep = firstStep + STEPS_PER_BANK - 1;
-
-	  std::cout << "Selected bank " << bank
-		    << " (steps " << firstStep
-		    << "-" << lastBankStep << ")\n";
-        }
-      }
-    }
-
-    else if (command == "laststep") {
-
-      int length;
-
-      if (input >> length) {
-        if (length < 1 || length > MAX_PATTERN_STEPS) {
-	  std::cout << "Pattern length must be 1-64.\n";
-        } else {
-
-	  pattern.lastStep = length;
-
-	  engine.setLastStep(length);	  
-
-	  std::cout << "Pattern length set to "
-		    << pattern.lastStep << " steps.\n";
-        }
-      }
-    }
-
-    else if (command == "step") {
-      int instrument;
-      int localStep;
-      int enabled;
-
-      if (input >> instrument >> localStep >> enabled) {
-        if (instrument < 0 || instrument >= NUM_INSTRUMENTS) {
-	  std::cout << "Instrument must be 0-15.\n";
-        }
-        else if (localStep < 1 || localStep > STEPS_PER_BANK) {
-	  std::cout << "Step must be 1-16 within the selected bank.\n";
-        }
-        else if (enabled != 0 && enabled != 1) {
-	  std::cout << "Step value must be 0 or 1.\n";
-        }
-        else {
-	  int absoluteStep =
-	    selectedBank * STEPS_PER_BANK + localStep - 1;
-
-	  pattern.steps[instrument][absoluteStep] = (enabled != 0);
-
-	  engine.setPatternStep(
-				instrument,
-				absoluteStep,
-				enabled != 0
-				);
-
-	  std::cout << "Instrument " << instrument
-		    << ", step " << absoluteStep + 1
-		    << " set to " << enabled << ".\n";
-        }
-      }
-    }
-
-    else if (command == "show") {
-      std::cout << "\nPattern length: "
-		<< pattern.lastStep << " steps\n";
-
-      std::cout << "Selected bank: "
-		<< selectedBank + 1 << "\n\n";
-
-      std::cout << "Instrument ";
-
-      for (int s = 0; s < STEPS_PER_BANK; ++s) {
-        std::cout << (s + 1) % 10;
-      }
-
-      std::cout << "\n";
-
-      int firstStep = selectedBank * STEPS_PER_BANK;
-
-      for (int i = 0; i < NUM_INSTRUMENTS; ++i) {
-        std::cout << "     " << i << "      ";
-
-        for (int s = 0; s < STEPS_PER_BANK; ++s) {
-	  int absoluteStep = firstStep + s;
-
-	  std::cout << (pattern.steps[i][absoluteStep] ? "X" : ".");
-        }
-
-        std::cout << "\n";
-      }
-
-      std::cout << "\n";
-    }
-    else if (command == "tempo") {
-      float bpm;
-
-      if (input >> bpm) {
-        if (engine.setTempo(bpm)) {
-	  std::cout << "Tempo: " << bpm << " BPM\n";
-        } else {
-	  std::cout << "Tempo must be 30-300 BPM.\n";
-        }
-      }
-    }
-
-    else if (command == "start") {
-      if (engine.startSequencer()) {
-        std::cout << "Sequencer started.\n";
-      } else {
-        std::cout << "Event queue full.\n";
-      }
-    }
-
-    else if (command == "stop") {
-      if (engine.stopSequencer()) {
-        std::cout << "Sequencer stopped.\n";
-      } else {
-        std::cout << "Event queue full.\n";
-      }
-    }
-    else {
-      if (!(input >> instrument >> value))
-        continue;
-
-      EventType type;
-
-      if (command == "level")
-        type = EventType::Level;
-      else if (command == "attack")
-        type = EventType::Attack;
-      else if (command == "decay")
-        type = EventType::Decay;
-      else if (command == "tune")
-        type = EventType::Tune;
-      else if (command == "cutoff")
-        type = EventType::Cutoff;
-      else if (command == "resonance")
-        type = EventType::Resonance;
-      else
-        continue;
-
-      engine.setParameter(type, instrument, value);
-    }    
-
-  }
-
-  engine.stop();
-
-  return 0;
-  } */
