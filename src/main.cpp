@@ -29,8 +29,8 @@ constexpr int NUM_BANKS = 4;
 constexpr int STEPS_PER_BANK = 16;
 
 struct Pattern {
-    bool steps[NUM_INSTRUMENTS][MAX_PATTERN_STEPS] = {};
-    int lastStep = 16;
+  bool steps[NUM_INSTRUMENTS][MAX_PATTERN_STEPS] = {};
+  int lastStep = 16;
 };
 
 struct Sample {
@@ -41,21 +41,21 @@ struct Sample {
 };
 
 struct InstrumentParams {
-    float level = 1.0f;
-    float attack = 0.0f;
-    float decay = 0.5f;
-    float tune = 0.0f;       // Semitones
-    float cutoff = 20000.0f;
-    float resonance = 0.0f;  // 0-1
+  float level = 1.0f;
+  float attack = 0.0f;
+  float decay = 0.5f;
+  float tune = 0.0f;       // Semitones
+  float cutoff = 20000.0f;
+  float resonance = 0.0f;  // 0-1
 };
 
 struct AtomicInstrumentParams {
-    std::atomic<float> level{1.0f};
-    std::atomic<float> attack{0.0f};
-    std::atomic<float> decay{0.5f};
-    std::atomic<float> tune{0.0f};
-    std::atomic<float> cutoff{20000.0f};
-    std::atomic<float> resonance{0.0f};
+  std::atomic<float> level{1.0f};
+  std::atomic<float> attack{0.0f};
+  std::atomic<float> decay{0.5f};
+  std::atomic<float> tune{0.0f};
+  std::atomic<float> cutoff{20000.0f};
+  std::atomic<float> resonance{0.0f};
 };
 
 struct Instrument {
@@ -63,20 +63,20 @@ struct Instrument {
 };
 
 enum class EventType : uint8_t {
-    Trigger,
-    Select,
-    Level,
-    Attack,
-    Decay,
-    Tune,
-    Cutoff,
-    Resonance,
-    TogglePatternStep,
-    PatternStep,
-    LastStep,
-    Tempo,
-    StartSequencer,
-    StopSequencer
+  Trigger,
+  Select,
+  Level,
+  Attack,
+  Decay,
+  Tune,
+  Cutoff,
+  Resonance,
+  TogglePatternStep,
+  PatternStep,
+  LastStep,
+  Tempo,
+  StartSequencer,
+  StopSequencer
 };
 
 struct Event {
@@ -137,19 +137,19 @@ struct Voice {
 
   const Sample* sample = nullptr;
 
-    int instrument = 0;
+  int instrument = 0;
 
-    double position = 0.0;
-    double increment = 1.0;
+  double position = 0.0;
+  double increment = 1.0;
 
-    float volume = 1.0f;
-    float elapsed = 0.0f;
+  float volume = 1.0f;
+  float elapsed = 0.0f;
 
-    // State-variable filter memory
-    float ic1 = 0.0f;
-    float ic2 = 0.0f;
+  // State-variable filter memory
+  float ic1 = 0.0f;
+  float ic2 = 0.0f;
 
-    bool active = false;
+  bool active = false;
 };
 
 class AudioEngine {
@@ -900,21 +900,21 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  ui.setPatternStepCallback(
-			    [&](int instrument, int step) {
-			      engine.togglePatternStep(instrument, step);
-			    }
-			    );
+  ui.setPatternStepCallback([&](int instrument, int step) {
+    engine.togglePatternStep(instrument, step);
+  });
 
-  ui.setTransportCallback(
-			  [&](bool start) {
-			    if (start) {
-			      engine.startSequencer();
-			    } else {
-			      engine.stopSequencer();
-			    }
-			  }
-			  );    
+  ui.setTransportCallback([&](bool start) {
+    if (start) {
+      engine.startSequencer();
+    } else {
+      engine.stopSequencer();
+    }
+  });
+
+  ui.setInstrumentSelectCallback([&](int instrument) {
+    engine.selectInstrument(instrument);
+  });  
 
   ui.run([&]() {
     int instrument;

@@ -9,10 +9,10 @@
 #include <cstdint>
 
 struct PatternDisplayData {
-    int instrument = 0;
-    uint64_t steps = 0;
-    int playingStep = -1;
-    bool running = false;
+  int instrument = 0;
+  uint64_t steps = 0;
+  int playingStep = -1;
+  bool running = false;
 };
 
 namespace {
@@ -86,86 +86,85 @@ namespace {
 } // end namespace
 
 struct InstrumentDisplayData {
-    int instrument = 0;
+  int instrument = 0;
 
-    float level = 0.0f;
-    float attack = 0.0f;
-    float decay = 0.0f;
-    float tune = 0.0f;
-    float cutoff = 0.0f;
-    float resonance = 0.0f;
+  float level = 0.0f;
+  float attack = 0.0f;
+  float decay = 0.0f;
+  float tune = 0.0f;
+  float cutoff = 0.0f;
+  float resonance = 0.0f;
 };
 
 class UI {
 public:
-    UI();
-    ~UI();
+  UI();
+  ~UI();
 
-    bool init();
-    void run(const std::function<void()>& update = {});    
-    void shutdown();
-    void setInstrumentDisplayData(const InstrumentDisplayData& data);    
-    void setPatternDisplayData(const PatternDisplayData& data);
-    void setPatternStepCallback(
-				std::function<void(int, int)> callback
-				);
-
-    void setTransportCallback(
-			      std::function<void(bool)> callback
-			      );    
+  bool init();
+  void run(const std::function<void()>& update = {});    
+  void shutdown();
+  void setInstrumentDisplayData(const InstrumentDisplayData& data);    
+  void setPatternDisplayData(const PatternDisplayData& data);
+  void setPatternStepCallback(std::function<void(int, int)> callback);
+  void setTransportCallback(std::function<void(bool)> callback);
+  void setInstrumentSelectCallback(std::function<void(int)> callback);  
     
 private:
-    SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;    
+  SDL_Window* window = nullptr;
+  SDL_Renderer* renderer = nullptr;    
 
-    bool running = false;
+  bool running = false;
 
-    static constexpr int WINDOW_WIDTH = 900;
-    static constexpr int WINDOW_HEIGHT = 760;
+  static constexpr int WINDOW_WIDTH = 900;
+  static constexpr int WINDOW_HEIGHT = 760;
 
-    static constexpr int OLED_SIZE = 128;
-    static constexpr int OLED_SCALE = 3;
+  static constexpr int OLED_SIZE = 128;
+  static constexpr int OLED_SCALE = 3;
 
-    TTF_Font* panelFont = nullptr;
+  TTF_Font* panelFont = nullptr;
 
-    // OLED framebuffer: one byte per pixel, 0 = off, 1 = on.
-    std::array<uint8_t, OLED_SIZE * OLED_SIZE> oledPixels{};
+  // OLED framebuffer: one byte per pixel, 0 = off, 1 = on.
+  std::array<uint8_t, OLED_SIZE * OLED_SIZE> oledPixels{};
 
-    InstrumentDisplayData displayData;
-    bool displayDataValid = false;
+  InstrumentDisplayData displayData;
+  bool displayDataValid = false;
 
-    PatternDisplayData patternData;
-    bool patternDataValid = false;
+  PatternDisplayData patternData;
+  bool patternDataValid = false;
 
-    int selectedBank = 0;
+  int selectedBank = 0;
 
-    std::function<void(int, int)> patternStepCallback;
-    std::function<void(bool)> transportCallback;
+  std::function<void(int, int)> patternStepCallback;
+  std::function<void(bool)> transportCallback;
 
-    void handleMouseClick(int x, int y);    
+  bool instrumentSelectMode = false;
+  std::function<void(int)> instrumentSelectCallback;  
 
-    void updateOLEDContent();
+  void handleMouseClick(int x, int y);    
 
-    void clearOLED();
-    void oledSetPixel(int x, int y, bool on = true);
-    void oledDrawChar(char c, int x, int y);
-    void oledDrawString(const std::string& text, int x, int y);
-    void renderOLEDBuffer(int startx, int starty);    
+  void updateOLEDContent();
 
-    bool loadFonts();
-    void handleEvents();
-    void render();
-    void renderEncoders();
-    void renderShiftButton();    
-    void renderOLED();
-    void renderFunctionButtons();
-    void renderStepButtons();    
+  void clearOLED();
+  void oledSetPixel(int x, int y, bool on = true);
+  void oledDrawChar(char c, int x, int y);
+  void oledDrawString(const std::string& text, int x, int y);
+  void renderOLEDBuffer(int startx, int starty);    
+
+  bool loadFonts();
+  void handleEvents();
+  void render();
+  void renderEncoders();
+  void renderShiftButton();    
+  void renderOLED();
+  void renderFunctionButtons();
+  void renderStepButtons();    
  
-    void drawText(
-        const std::string& text,
-        int x,
-        int y,
-        SDL_Color color
-    );
-    void drawFilledCircle(int x, int y, int radius, SDL_Color color);    
+  void drawText(
+		const std::string& text,
+		int x,
+		int y,
+		SDL_Color color
+		);
+  void drawFilledCircle(int x, int y, int radius, SDL_Color color);    
 };
