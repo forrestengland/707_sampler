@@ -81,24 +81,56 @@ void UI::run(const std::function<void()>& update) {
   }
 }
 
-void UI::handleEvents() {
-  SDL_Event event;
+void UI::handleEvents()
+{
+    SDL_Event event;
 
-  while (SDL_PollEvent(&event)) {
+    while (SDL_PollEvent(&event)) {
 
-    if (event.type == SDL_QUIT) {
-      running = false;
+        if (event.type == SDL_QUIT) {
+            running = false;
+        }
+
+        if (event.type == SDL_MOUSEBUTTONDOWN &&
+            event.button.button == SDL_BUTTON_LEFT) {
+
+            const int centerY = 100;
+            const int spacing = 190;
+            const int startX = 165;
+
+            for (int i = 0; i < 4; ++i) {
+                int centerX = startX + i * spacing;
+
+                int dx = event.button.x - centerX;
+                int dy = event.button.y - centerY;
+
+                if (dx * dx + dy * dy <= 36 * 36) {
+                    draggingEncoder = i;
+                    lastMouseY = event.button.y;
+                    SDL_CaptureMouse(SDL_TRUE);
+                    break;
+                }
+            }
+
+            if (draggingEncoder < 0) {
+                handleMouseClick(
+                    event.button.x,
+                    event.button.y
+                );
+            }
+        }
+
+        if (event.type == SDL_MOUSEMOTION &&
+            draggingEncoder >= 0) {
+            handleEncoderMotion(event.motion.y);
+        }
+
+        if (event.type == SDL_MOUSEBUTTONUP &&
+            event.button.button == SDL_BUTTON_LEFT) {
+            draggingEncoder = -1;
+            SDL_CaptureMouse(SDL_FALSE);
+        }
     }
-
-    if (event.type == SDL_MOUSEBUTTONDOWN &&
-	event.button.button == SDL_BUTTON_LEFT) {
-
-      handleMouseClick(
-		       event.button.x,
-		       event.button.y
-		       );
-    }
-  }
 }
 
 void UI::drawText(
@@ -735,4 +767,33 @@ void UI::setInstrumentSelectCallback(std::function<void(int)> callback) {
 
 void UI::setLastStepCallback(std::function<void(int)> callback) {
     lastStepCallback = callback;
+}
+
+void UI::setEncoderCallback(
+    std::function<void(int, int, float)> callback)
+{
+    encoderCallback = callback;
+}
+
+void UI::handleEncoderMotion(int mouseY)
+{
+    if (draggingEncoder < 0 ||
+        !encoderCallback ||
+        !displayDataValid) {
+        return;
+    }
+
+    int deltaY = lastMouseY - mouseY;
+    lastMouseY = mouseY;
+
+    if (deltaY == 0)
+        return;
+
+    constexpr float sensitivity = 0.005f;
+
+    encoderCallback(
+        displayData.instrument,
+        draggingEncoder,
+        deltaY * sensitivity
+    );
 }

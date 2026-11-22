@@ -110,7 +110,8 @@ public:
   void setPatternStepCallback(std::function<void(int, int)> callback);
   void setTransportCallback(std::function<void(bool)> callback);
   void setInstrumentSelectCallback(std::function<void(int)> callback);
-  void setLastStepCallback(std::function<void(int)> callback);  
+  void setLastStepCallback(std::function<void(int)> callback);
+  void setEncoderCallback(std::function<void(int, int, float)> callback);    
     
 private:
   SDL_Window* window = nullptr;
@@ -145,7 +146,12 @@ private:
 
   bool lastStepSelectMode = false;
 
-  std::function<void(int)> lastStepCallback;  
+  std::function<void(int)> lastStepCallback;
+
+  int draggingEncoder = -1;
+  int lastMouseY = 0;
+
+  std::function<void(int, int, float)> encoderCallback;
 
   void handleMouseClick(int x, int y);    
 
@@ -172,5 +178,7 @@ private:
 		int y,
 		SDL_Color color
 		);
-  void drawFilledCircle(int x, int y, int radius, SDL_Color color);    
+  void drawFilledCircle(int x, int y, int radius, SDL_Color color);
+
+  void handleEncoderMotion(int mouseY);
 };

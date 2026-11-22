@@ -76,7 +76,11 @@ enum class EventType : uint8_t {
   LastStep,
   Tempo,
   StartSequencer,
-  StopSequencer
+  StopSequencer,
+  AdjustLevel,
+  AdjustTune,
+  AdjustCutoff,
+  AdjustDecay
 };
 
 struct Event {
@@ -593,6 +597,34 @@ private:
 	p.resonance = std::clamp(event.value, 0.0f, 1.0f);
 	break;
 
+      case EventType::AdjustLevel:
+	p.level = std::clamp(
+			     p.level + event.value,
+			     0.0f, 1.0f
+			     );
+	break;
+
+      case EventType::AdjustTune:
+	p.tune = std::clamp(
+			    p.tune + event.value * 48.0f,
+			    -24.0f, 24.0f
+			    );
+	break;
+
+      case EventType::AdjustCutoff:
+	p.cutoff = std::clamp(
+			      p.cutoff * std::pow(200.0f, event.value),
+			      100.0f, 20000.0f
+			      );
+	break;
+
+      case EventType::AdjustDecay:
+	p.decay = std::clamp(
+			     p.decay * std::pow(1000.0f, event.value),
+			     0.005f, 5.0f
+			     );
+	break;	
+
       default:
 	break;
       }
@@ -913,7 +945,37 @@ int main(int argc, char** argv) {
 
   ui.setLastStepCallback([&](int lastStep) {
     engine.setLastStep(lastStep);
-  });  
+  });
+
+  ui.setEncoderCallback(
+			[&](int instrument, int encoder, float delta) {
+
+			  EventType type;
+
+			  switch (encoder) {
+			  case 0:
+			    type = EventType::AdjustLevel;
+			    break;
+
+			  case 1:
+			    type = EventType::AdjustTune;
+			    break;
+
+			  case 2:
+			    type = EventType::AdjustCutoff;
+			    break;
+
+			  case 3:
+			    type = EventType::AdjustDecay;
+			    break;
+
+			  default:
+			    return;
+			  }
+
+			  engine.setParameter(type, instrument, delta);
+			}
+			);  
 
   ui.run([&]() {
     int instrument;
