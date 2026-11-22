@@ -28,6 +28,8 @@ constexpr int MAX_PATTERN_STEPS = 64;
 constexpr int NUM_BANKS = 4;
 constexpr int STEPS_PER_BANK = 16;
 
+constexpr int MAX_RECORD_SECONDS = 10;
+
 struct Pattern {
   bool steps[NUM_INSTRUMENTS][MAX_PATTERN_STEPS] = {};
   int lastStep = 16;
@@ -238,6 +240,7 @@ public:
   }
 
   bool start() {
+    
     jack_status_t status{};
 
     client = jack_client_open(
@@ -251,6 +254,11 @@ public:
     }
 
     sampleRate = jack_get_sample_rate(client);
+
+    recordBuffer.resize(
+			static_cast<size_t>(sampleRate) *
+			MAX_RECORD_SECONDS * 2
+			);    
 
     leftPort = jack_port_register(
 				  client,
@@ -270,6 +278,27 @@ public:
       std::cerr << "Cannot create JACK ports\n";
       return false;
     }
+
+    inputLeftPort = jack_port_register(
+				       client,
+				       "in_l",
+				       JACK_DEFAULT_AUDIO_TYPE,
+				       JackPortIsInput,
+				       0
+				       );
+
+    inputRightPort = jack_port_register(
+					client,
+					"in_r",
+					JACK_DEFAULT_AUDIO_TYPE,
+					JackPortIsInput,
+					0
+					);
+
+    if (!inputLeftPort || !inputRightPort) {
+      std::cerr << "Cannot create JACK audio input ports\n";
+      return false;
+    }    
 
     midiInputPort = jack_port_register(
 				       client,
@@ -403,6 +432,8 @@ private:
 
   jack_port_t* leftPort = nullptr;
   jack_port_t* rightPort = nullptr;
+  jack_port_t* inputLeftPort = nullptr;
+  jack_port_t* inputRightPort = nullptr;  
 
   jack_port_t* midiInputPort = nullptr;  
 
@@ -448,7 +479,15 @@ private:
 
   int playingStep = -1;
 
-  std::atomic<int> displayLastStep{16};  
+  std::atomic<int> displayLastStep{16};
+
+  std::vector<float> recordBuffer;
+
+  std::atomic<bool> recording{false};
+  std::atomic<bool> recordingFinished{false};
+
+  std::atomic<uint64_t> recordedFrames{0};
+  std::atomic<int> recordingInstrument{0};  
 
   void publishDisplayState() {
 
