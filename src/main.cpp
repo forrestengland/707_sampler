@@ -469,6 +469,69 @@ public:
     recording.store(true, std::memory_order_release);
 
     return true;
+  }
+
+  void serviceRecording() {
+
+    // The audio thread has completed the sample swap.
+    if (sampleSwapComplete.exchange(
+				    false,
+				    std::memory_order_acquire)) {
+
+      // pendingSample now contains the old instrument sample.
+      // Free it here, not in the JACK callback.
+      pendingSample = Sample{};
+
+      recordingInstallQueued = false;
+
+      recordingFinished.store(
+			      false,
+			      std::memory_order_release
+			      );
+    }
+
+    // Nothing to install yet, or an installation is already underway.
+    if (!recordingFinished.load(std::memory_order_acquire) ||
+        recordingInstallQueued) {
+      return;
+    }
+
+    uint64_t frames = recordedFrames.load(
+					  std::memory_order_relaxed
+					  );
+
+    if (frames == 0) {
+      recordingFinished.store(false, std::memory_order_release);
+      return;
+    }
+
+    Sample newSample;
+
+    newSample.channels = 2;
+    newSample.sampleRate = sampleRate;
+    newSample.frames = frames;
+    newSample.data.resize(static_cast<size_t>(frames) * 2);
+
+    std::copy_n(
+		recordBuffer.begin(),
+		static_cast<size_t>(frames) * 2,
+		newSample.data.begin()
+		);
+
+    pendingSample = std::move(newSample);
+
+    pendingSampleInstrument.store(
+				  recordingInstrument.load(std::memory_order_relaxed),
+				  std::memory_order_relaxed
+				  );
+
+    recordingInstallQueued = true;
+
+    // Publish the prepared sample to the audio thread.
+    sampleSwapPending.store(
+			    true,
+			    std::memory_order_release
+			    );
   }  
 
 private:
@@ -533,7 +596,16 @@ private:
   std::atomic<uint64_t> recordedFrames{0};
   std::atomic<int> recordingInstrument{0};
 
-  std::atomic<bool> stopRecordingRequested{false};  
+  std::atomic<bool> stopRecordingRequested{false};
+
+  Sample pendingSample;
+
+  std::atomic<int> pendingSampleInstrument{0};
+  std::atomic<bool> sampleSwapPending{false};
+  std::atomic<bool> sampleSwapComplete{false};
+
+  // Used only by the main/UI thread.
+  bool recordingInstallQueued = false;  
 
   void publishDisplayState() {
 
@@ -807,6 +879,34 @@ private:
       jack_midi_get_event_count(midiBuffer);
 
     uint32_t midiIndex = 0;
+
+    if (sampleSwapPending.exchange(
+				   false,
+				   std::memory_order_acquire)) {
+
+      int instrumentIndex = pendingSampleInstrument.load(
+							 std::memory_order_relaxed
+							 );
+
+      if (instrumentIndex >= 0 &&
+	  instrumentIndex < NUM_INSTRUMENTS) {
+
+        Sample& currentSample =
+	  instruments[instrumentIndex].sample;
+
+        // Exchange the sample data without allocating or freeing.
+        currentSample.data.swap(pendingSample.data);
+
+        std::swap(currentSample.frames, pendingSample.frames);
+        std::swap(currentSample.channels, pendingSample.channels);
+        std::swap(currentSample.sampleRate, pendingSample.sampleRate);
+      }
+
+      sampleSwapComplete.store(
+			       true,
+			       std::memory_order_release
+			       );
+    }    
 
     for (jack_nframes_t frame = 0;
 	 frame < nframes;
@@ -1150,6 +1250,8 @@ int main(int argc, char** argv) {
       ui.setPatternDisplayData(data);
     }
 
+    engine.serviceRecording();
+
     RecordingDisplayData recordingData;
 
     recordingData.recording = engine.isRecording();
@@ -1158,7 +1260,7 @@ int main(int argc, char** argv) {
       engine.getRecordingElapsedSeconds();
     recordingData.maxSeconds = MAX_RECORD_SECONDS;
 
-    ui.setRecordingDisplayData(recordingData);    
+    ui.setRecordingDisplayData(recordingData);
   });
 
   ui.shutdown();
