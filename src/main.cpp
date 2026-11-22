@@ -160,6 +160,21 @@ struct Voice {
 
 class AudioEngine {
 public:
+
+  bool isRecording() const {
+    return recording.load(std::memory_order_acquire);
+  }
+
+  bool isRecordingFinished() const {
+    return recordingFinished.load(std::memory_order_acquire);
+  }
+
+  float getRecordingElapsedSeconds() const {
+    return static_cast<float>(
+			      recordedFrames.load(std::memory_order_relaxed)
+			      ) / sampleRate;
+  }
+  
   bool getDisplayState(
 		       int& instrument,
 		       InstrumentParams& values
@@ -425,6 +440,35 @@ public:
     running = displaySequencerRunning.load(std::memory_order_relaxed);
 
     return true;
+  }
+
+  bool toggleRecording() {
+
+    if (recording.load(std::memory_order_acquire)) {
+      stopRecordingRequested.store(
+				   true,
+				   std::memory_order_release
+				   );
+      return true;
+    }
+
+    // Don't overwrite a recording that hasn't been collected yet.
+    if (recordingFinished.load(std::memory_order_acquire)) {
+      return false;
+    }
+
+    recordedFrames.store(0, std::memory_order_relaxed);
+
+    recordingInstrument.store(
+			      displaySelectedInstrument.load(std::memory_order_acquire),
+			      std::memory_order_relaxed
+			      );
+
+    stopRecordingRequested.store(false, std::memory_order_relaxed);
+
+    recording.store(true, std::memory_order_release);
+
+    return true;
   }  
 
 private:
@@ -487,7 +531,9 @@ private:
   std::atomic<bool> recordingFinished{false};
 
   std::atomic<uint64_t> recordedFrames{0};
-  std::atomic<int> recordingInstrument{0};  
+  std::atomic<int> recordingInstrument{0};
+
+  std::atomic<bool> stopRecordingRequested{false};  
 
   void publishDisplayState() {
 
@@ -744,6 +790,10 @@ private:
 
     float* outR = static_cast<float*>(jack_port_get_buffer(rightPort, nframes));
 
+    float* inL = static_cast<float*>(jack_port_get_buffer(inputLeftPort, nframes));
+
+    float* inR = static_cast<float*>(jack_port_get_buffer(inputRightPort, nframes));    
+
     void* midiBuffer = jack_port_get_buffer(midiInputPort, nframes);
 
     std::fill(outL, outL + nframes, 0.0f);
@@ -761,6 +811,50 @@ private:
     for (jack_nframes_t frame = 0;
 	 frame < nframes;
 	 ++frame) {
+
+      if (recording.load(std::memory_order_relaxed)) {
+
+	if (stopRecordingRequested.exchange(
+					    false,
+					    std::memory_order_relaxed)) {
+
+	  recording.store(false, std::memory_order_relaxed);
+
+	  recordingFinished.store(
+				  true,
+				  std::memory_order_release
+				  );
+
+	} else {
+
+	  uint64_t position = recordedFrames.load(
+						  std::memory_order_relaxed
+						  );
+
+	  uint64_t maxFrames = recordBuffer.size() / 2;
+
+	  if (position < maxFrames) {
+
+            recordBuffer[position * 2] = inL[frame];
+            recordBuffer[position * 2 + 1] = inR[frame];
+
+            recordedFrames.store(
+				 position + 1,
+				 std::memory_order_relaxed
+				 );
+
+            if (position + 1 >= maxFrames) {
+
+	      recording.store(false, std::memory_order_relaxed);
+
+	      recordingFinished.store(
+				      true,
+				      std::memory_order_release
+				      );
+            }
+	  }
+	}
+      }      
 
       // update sequencer
       // Sequencer clock: one step per sixteenth note.
@@ -1014,7 +1108,13 @@ int main(int argc, char** argv) {
 
 			  engine.setParameter(type, instrument, delta);
 			}
-			);  
+			);
+
+  ui.setRecordCallback([&]() {
+    if (!engine.toggleRecording()) {
+      std::cout << "Previous recording hasn't been collected yet\n";
+    }
+  });  
 
   ui.run([&]() {
     int instrument;
@@ -1048,7 +1148,17 @@ int main(int argc, char** argv) {
       data.running = running;
 
       ui.setPatternDisplayData(data);
-    }    
+    }
+
+    RecordingDisplayData recordingData;
+
+    recordingData.recording = engine.isRecording();
+    recordingData.saved = false;
+    recordingData.elapsedSeconds =
+      engine.getRecordingElapsedSeconds();
+    recordingData.maxSeconds = MAX_RECORD_SECONDS;
+
+    ui.setRecordingDisplayData(recordingData);    
   });
 
   ui.shutdown();
