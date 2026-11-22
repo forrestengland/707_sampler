@@ -365,45 +365,42 @@ void UI::renderStepButtons() {
     int absoluteStep =
       selectedBank * 16 + i;
 
-    bool active = false;
-    bool playing = false;
-
-    if (patternDataValid) {
-
-      active =
-	(patternData.steps &
-	 (uint64_t{1} << absoluteStep)) != 0;
-
-      playing =
-	patternData.running &&
-	patternData.playingStep == absoluteStep;
-    }
-
     SDL_Color ledColor{45, 45, 45, 255};
 
-    if (active) {
-      ledColor = {20, 150, 65, 255};
-    }
+    if (instrumentSelectMode) {
+      // Show the currently selected instrument.
+      if (patternDataValid && patternData.instrument == i) {
+        ledColor = {90, 255, 120, 255};
+      }
+    } else {
 
-    if (playing) {
-      ledColor = {90, 255, 120, 255};
-    }
+      bool active = patternDataValid &&
+        (patternData.steps & (uint64_t{1} << absoluteStep)) != 0;
 
-    SDL_SetRenderDrawColor(
-			   renderer,
+      bool playing = patternDataValid &&
+        patternData.running &&
+        patternData.playingStep == absoluteStep;
+
+      if (active) {
+        ledColor = {20, 150, 65, 255};
+      }
+
+      if (playing) {
+        ledColor = {90, 255, 120, 255};
+      }
+    }    
+
+    SDL_SetRenderDrawColor(renderer,
 			   ledColor.r,
 			   ledColor.g,
 			   ledColor.b,
-			   ledColor.a
-			   );
+			   ledColor.a);
 
     SDL_Rect led{x + 10, y - 13, 18, 7};
     SDL_RenderFillRect(renderer, &led);
 
     // Button body.
-    SDL_SetRenderDrawColor(
-			   renderer, 75, 75, 75, 255
-			   );
+    SDL_SetRenderDrawColor(renderer, 75, 75, 75, 255);
 
     SDL_Rect button{x, y, buttonSize, buttonSize};
     SDL_RenderFillRect(renderer, &button);
@@ -572,13 +569,20 @@ void UI::updateOLEDContent() {
   char buffer[32];
 
   std::snprintf(
-		buffer,
-		sizeof(buffer),
-		"INSTRUMENT %02d",
-		displayData.instrument + 1
-		);
-
+      buffer,
+      sizeof(buffer),
+      "INST %02d",
+      displayData.instrument + 1
+  );
   oledDrawString(buffer, 8, 8);
+
+  std::snprintf(
+      buffer,
+      sizeof(buffer),
+      "BANK %d",
+      selectedBank + 1
+  );
+  oledDrawString(buffer, 80, 8);  
 
   oledDrawString("LEVEL", 8, 27);
   std::snprintf(buffer, sizeof(buffer), "%.2f",
