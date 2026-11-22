@@ -8,6 +8,13 @@
 #include <functional>
 #include <cstdint>
 
+struct RecordingDisplayData {
+    bool recording = false;
+    bool saved = false;
+    float elapsedSeconds = 0.0f;
+    float maxSeconds = 10.0f;
+};
+
 struct PatternDisplayData {
     int instrument = 0;
     uint64_t steps = 0;
@@ -112,7 +119,9 @@ public:
   void setInstrumentSelectCallback(std::function<void(int)> callback);
   void setLastStepCallback(std::function<void(int)> callback);
   void setEncoderCallback(std::function<void(int, int, float)> callback);    
-    
+  void setRecordingDisplayData(const RecordingDisplayData& data);
+  void setRecordCallback(std::function<void()> callback);  
+  
 private:
   SDL_Window* window = nullptr;
   SDL_Renderer* renderer = nullptr;    
@@ -152,6 +161,10 @@ private:
   int lastMouseY = 0;
 
   std::function<void(int, int, float)> encoderCallback;
+
+  RecordingDisplayData recordingData;
+
+  std::function<void()> recordCallback;  
 
   void handleMouseClick(int x, int y);    
 

@@ -296,90 +296,89 @@ void UI::renderOLED() {
 
 void UI::renderFunctionButtons() {
 
-  const int y = 610;
-  const int width = 95;
-  const int spacing = 115;
-  const int startX = 100;
+    const int y = 610;
+    const int width = 95;
+    const int spacing = 105;
+    const int startX = 25;
 
-  const char* labels[] = {
-    "INST",
-    "BANK 1",
-    "BANK 2",
-    "BANK 3",
-    "BANK 4",
-    "LAST STEP"
-  };
+    const char* labels[] = {
+        "INST",
+        "BANK 1",
+        "BANK 2",
+        "BANK 3",
+        "BANK 4",
+        "LAST STEP",
+        recordingData.recording ? "STOP REC" : "REC"
+    };
 
-  for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
 
-    int x = startX + i * spacing;
+        int x = startX + i * spacing;
 
-    bool selected =
-      (i >= 1 && i <= 4 &&
-       selectedBank == i - 1);
+        bool selected =
+            (i >= 1 && i <= 4 &&
+             selectedBank == i - 1);
 
-    if (selected) {
-      SDL_SetRenderDrawColor(
-			     renderer, 35, 100, 55, 255
-			     );
-    } else {
-      SDL_SetRenderDrawColor(
-			     renderer, 65, 65, 65, 255
-			     );
+        if (i == 6 && recordingData.recording) {
+            SDL_SetRenderDrawColor(renderer, 150, 35, 35, 255);
+        }
+        else if (selected) {
+            SDL_SetRenderDrawColor(renderer, 35, 100, 55, 255);
+        }
+        else {
+            SDL_SetRenderDrawColor(renderer, 65, 65, 65, 255);
+        }
+
+        SDL_Rect button{x, y, width, 42};
+        SDL_RenderFillRect(renderer, &button);
+
+        int textWidth = 0;
+        int textHeight = 0;
+
+        if (panelFont) {
+            TTF_SizeUTF8(
+                panelFont,
+                labels[i],
+                &textWidth,
+                &textHeight
+            );
+
+            drawText(
+                labels[i],
+                x + (width - textWidth) / 2,
+                y + (42 - textHeight) / 2,
+                {230, 230, 220, 255}
+            );
+        }
     }
 
-    SDL_Rect button{x, y, width, 42};
-    SDL_RenderFillRect(renderer, &button);
+    // Play / Stop button.
+    const char* transportLabel =
+        patternData.running ? "STOP" : "PLAY";
+
+    SDL_SetRenderDrawColor(renderer, 65, 65, 65, 255);
+
+    SDL_Rect transportButton{760, y, 95, 42};
+    SDL_RenderFillRect(renderer, &transportButton);
 
     int textWidth = 0;
     int textHeight = 0;
 
     if (panelFont) {
-      TTF_SizeUTF8(
-		   panelFont,
-		   labels[i],
-		   &textWidth,
-		   &textHeight
-		   );
+        TTF_SizeUTF8(
+            panelFont,
+            transportLabel,
+            &textWidth,
+            &textHeight
+        );
 
-      drawText(
-	       labels[i],
-	       x + (width - textWidth) / 2,
-	       y + (42 - textHeight) / 2,
-	       {230, 230, 220, 255}
-	       );
+        drawText(
+            transportLabel,
+            760 + (95 - textWidth) / 2,
+            y + (42 - textHeight) / 2,
+            {230, 230, 220, 255}
+        );
     }
-  }
-
-  // Play / Stop button.
-  const char* transportLabel =
-    patternData.running ? "STOP" : "PLAY";
-
-  SDL_SetRenderDrawColor(
-			 renderer, 65, 65, 65, 255
-			 );
-
-  SDL_Rect transportButton{790, y, 95, 42};
-  SDL_RenderFillRect(renderer, &transportButton);
-
-  int textWidth = 0;
-  int textHeight = 0;
-
-  if (panelFont) {
-    TTF_SizeUTF8(
-		 panelFont,
-		 transportLabel,
-		 &textWidth,
-		 &textHeight
-		 );
-
-    drawText(
-	     transportLabel,
-	     790 + (95 - textWidth) / 2,
-	     y + (42 - textHeight) / 2,
-	     {230, 230, 220, 255}
-	     );
-  }
 }
 
 void UI::renderStepButtons() {
@@ -595,6 +594,7 @@ void UI::setInstrumentDisplayData(
 }
 
 void UI::updateOLEDContent() {
+
   clearOLED();
 
   if (!displayDataValid) {
@@ -652,6 +652,26 @@ void UI::updateOLEDContent() {
   std::snprintf(buffer, sizeof(buffer), "%.2f",
 		displayData.resonance);
   oledDrawString(buffer, 50, 87);
+
+  if (recordingData.recording) {
+    oledDrawString("REC RECORDING", 8, 105);
+
+    std::snprintf(
+		  buffer,
+		  sizeof(buffer),
+		  "%02d:%04.1f",
+		  static_cast<int>(recordingData.elapsedSeconds / 60.0f),
+		  std::fmod(recordingData.elapsedSeconds, 60.0f)
+		  );
+
+    oledDrawString(buffer, 8, 117);
+  }
+  else if (recordingData.saved) {
+    oledDrawString("SAMPLE SAVED", 8, 105);
+  }
+  else {
+    oledDrawString("REC READY", 8, 105);
+  }  
 }
 
 void UI::setPatternDisplayData(
@@ -687,10 +707,17 @@ void UI::handleMouseClick(int x, int y) {
   if (y >= 610 && y <= 652) {
 
     const int width = 95;
-    const int spacing = 115;
-    const int startX = 100;
+    const int spacing = 105;
+    const int startX = 25;
 
-    // bank buttons
+    // INST button.
+    if (x >= startX && x < startX + width) {
+      instrumentSelectMode = !instrumentSelectMode;
+      lastStepSelectMode = false;
+      return;
+    }
+
+    // Bank buttons.
     for (int i = 1; i <= 4; ++i) {
       int buttonX = startX + i * spacing;
 
@@ -700,22 +727,30 @@ void UI::handleMouseClick(int x, int y) {
       }
     }
 
-    // LAST STEP button
-    if (x >= 675 && x < 770) {
+    // LAST STEP button.
+    if (x >= 550 && x < 645) {
       lastStepSelectMode = !lastStepSelectMode;
       instrumentSelectMode = false;
       return;
-    }    
+    }
+
+    // RECORD button.
+    if (x >= 655 && x < 750) {
+      if (recordCallback) {
+	recordCallback();
+      }
+      return;
+    }
 
     // Play / Stop button.
-    if (x >= 790 && x < 885) {
+    if (x >= 760 && x < 855) {
       if (transportCallback) {
 	bool start = !patternData.running;
 	transportCallback(start);
       }
       return;
     }
-  }
+  }  
 
   // Pattern step buttons.
   if (y >= 690 && y <= 728) {
@@ -796,4 +831,14 @@ void UI::handleEncoderMotion(int mouseY)
         draggingEncoder,
         deltaY * sensitivity
     );
+}
+
+void UI::setRecordingDisplayData(
+    const RecordingDisplayData& data)
+{
+    recordingData = data;
+}
+
+void UI::setRecordCallback(std::function<void()> callback) {
+    recordCallback = std::move(callback);
 }
