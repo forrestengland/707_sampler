@@ -382,23 +382,14 @@ public:
 			      int& instrument,
 			      uint64_t& steps,
 			      int& playingStep,
+			      int& lastStep,
 			      bool& running
 			      ) const {
-    instrument = displaySelectedInstrument.load(
-						std::memory_order_acquire
-						);
-
-    steps = displayPatternSteps.load(
-				     std::memory_order_relaxed
-				     );
-
-    playingStep = displayPlayingStep.load(
-					  std::memory_order_relaxed
-					  );
-
-    running = displaySequencerRunning.load(
-					   std::memory_order_relaxed
-					   );
+    instrument = displaySelectedInstrument.load(std::memory_order_acquire);
+    steps = displayPatternSteps.load(std::memory_order_relaxed);
+    playingStep = displayPlayingStep.load(std::memory_order_relaxed);
+    lastStep = displayLastStep.load(std::memory_order_relaxed);
+    running = displaySequencerRunning.load(std::memory_order_relaxed);
 
     return true;
   }  
@@ -451,7 +442,9 @@ private:
   std::atomic<int> displayPlayingStep{-1};
   std::atomic<bool> displaySequencerRunning{false};
 
-  int playingStep = -1; 
+  int playingStep = -1;
+
+  std::atomic<int> displayLastStep{16};  
 
   void publishDisplayState() {
 
@@ -494,6 +487,8 @@ private:
 				    selectedInstrument,
 				    std::memory_order_release
 				    );
+
+    displayLastStep.store(pattern.lastStep, std::memory_order_relaxed);    
   }  
 
   static int processCallback(
@@ -914,6 +909,10 @@ int main(int argc, char** argv) {
 
   ui.setInstrumentSelectCallback([&](int instrument) {
     engine.selectInstrument(instrument);
+  });
+
+  ui.setLastStepCallback([&](int lastStep) {
+    engine.setLastStep(lastStep);
   });  
 
   ui.run([&]() {
@@ -934,17 +933,21 @@ int main(int argc, char** argv) {
 
     uint64_t steps;
     int playingStep;
+    int lastStep;
     bool running;
 
-    if (engine.getPatternDisplayState(instrument, steps,
-                                      playingStep, running)) {
+    if (engine.getPatternDisplayState(instrument, steps, playingStep,
+				      lastStep, running)) {
+
       PatternDisplayData data;
       data.instrument = instrument;
       data.steps = steps;
       data.playingStep = playingStep;
+      data.lastStep = lastStep;
       data.running = running;
+
       ui.setPatternDisplayData(data);
-    }
+    }    
   });
 
   ui.shutdown();

@@ -9,10 +9,11 @@
 #include <cstdint>
 
 struct PatternDisplayData {
-  int instrument = 0;
-  uint64_t steps = 0;
-  int playingStep = -1;
-  bool running = false;
+    int instrument = 0;
+    uint64_t steps = 0;
+    int playingStep = -1;
+    int lastStep = 16;
+    bool running = false;
 };
 
 namespace {
@@ -108,7 +109,8 @@ public:
   void setPatternDisplayData(const PatternDisplayData& data);
   void setPatternStepCallback(std::function<void(int, int)> callback);
   void setTransportCallback(std::function<void(bool)> callback);
-  void setInstrumentSelectCallback(std::function<void(int)> callback);  
+  void setInstrumentSelectCallback(std::function<void(int)> callback);
+  void setLastStepCallback(std::function<void(int)> callback);  
     
 private:
   SDL_Window* window = nullptr;
@@ -139,7 +141,11 @@ private:
   std::function<void(bool)> transportCallback;
 
   bool instrumentSelectMode = false;
-  std::function<void(int)> instrumentSelectCallback;  
+  std::function<void(int)> instrumentSelectCallback;
+
+  bool lastStepSelectMode = false;
+
+  std::function<void(int)> lastStepCallback;  
 
   void handleMouseClick(int x, int y);    
 

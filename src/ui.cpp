@@ -362,18 +362,23 @@ void UI::renderStepButtons() {
 
     int x = startX + i * spacing;
 
-    int absoluteStep =
-      selectedBank * 16 + i;
-
     SDL_Color ledColor{45, 45, 45, 255};
 
+    int absoluteStep = selectedBank * 16 + i;
+
     if (instrumentSelectMode) {
-      // Show the currently selected instrument.
-      if (patternDataValid && patternData.instrument == i) {
+      if (patternDataValid &&
+	  patternData.instrument == i) {
         ledColor = {90, 255, 120, 255};
       }
-    } else {
-
+    }
+    else if (lastStepSelectMode) {
+      if (patternDataValid &&
+	  patternData.lastStep == absoluteStep + 1) {
+        ledColor = {90, 255, 120, 255};
+      }
+    }
+    else {
       bool active = patternDataValid &&
         (patternData.steps & (uint64_t{1} << absoluteStep)) != 0;
 
@@ -577,11 +582,13 @@ void UI::updateOLEDContent() {
   oledDrawString(buffer, 8, 8);
 
   std::snprintf(
-      buffer,
-      sizeof(buffer),
-      "BANK %d",
-      selectedBank + 1
-  );
+		buffer,
+		sizeof(buffer),
+		"B%d L%02d",
+		selectedBank + 1,
+		patternData.lastStep
+		);
+
   oledDrawString(buffer, 80, 8);  
 
   oledDrawString("LEVEL", 8, 27);
@@ -640,6 +647,7 @@ void UI::handleMouseClick(int x, int y) {
   if (y >= 610 && y <= 652 &&
       x >= 100 && x < 195) {
     instrumentSelectMode = !instrumentSelectMode;
+    lastStepSelectMode = false;
     return;
   }
 
@@ -660,6 +668,13 @@ void UI::handleMouseClick(int x, int y) {
       }
     }
 
+    // LAST STEP button
+    if (x >= 675 && x < 770) {
+      lastStepSelectMode = !lastStepSelectMode;
+      instrumentSelectMode = false;
+      return;
+    }    
+
     // Play / Stop button.
     if (x >= 790 && x < 885) {
       if (transportCallback) {
@@ -672,7 +687,6 @@ void UI::handleMouseClick(int x, int y) {
 
   // Pattern step buttons.
   if (y >= 690 && y <= 728) {
-
     const int buttonSize = 38;
     const int spacing = 51;
     const int startX = 45;
@@ -688,24 +702,37 @@ void UI::handleMouseClick(int x, int y) {
 	  }
 
 	  instrumentSelectMode = false;
-		
-	} else {
+	}
+	else if (lastStepSelectMode) {
+	  int absoluteStep = selectedBank * 16 + i;
 
+	  if (lastStepCallback) {
+	    lastStepCallback(absoluteStep + 1);
+	  }
+
+	  lastStepSelectMode = false;
+	}
+	else {
 	  int absoluteStep = selectedBank * 16 + i;
 
 	  if (patternStepCallback && patternDataValid) {
-	    patternStepCallback(patternData.instrument,
-				absoluteStep);
+	    patternStepCallback(
+				patternData.instrument,
+				absoluteStep
+				);
 	  }
 	}
 
 	return;
-      }	      
-
+      }
     }
-  }
+  }  
 }
 
 void UI::setInstrumentSelectCallback(std::function<void(int)> callback) {
   instrumentSelectCallback = callback;
+}
+
+void UI::setLastStepCallback(std::function<void(int)> callback) {
+    lastStepCallback = callback;
 }
