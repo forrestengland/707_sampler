@@ -379,6 +379,37 @@ void UI::renderFunctionButtons() {
             {230, 230, 220, 255}
         );
     }
+
+    // Shift button.
+    SDL_SetRenderDrawColor(
+			   renderer,
+			   shiftMode ? 35 : 65,
+			   shiftMode ? 100 : 65,
+			   shiftMode ? 55 : 65,
+			   255
+			   );
+
+    SDL_Rect shiftButton{760, 655, 95, 28};
+    SDL_RenderFillRect(renderer, &shiftButton);
+
+    if (panelFont) {
+      int textWidth = 0;
+      int textHeight = 0;
+
+      TTF_SizeUTF8(
+		   panelFont,
+		   "SHIFT",
+		   &textWidth,
+		   &textHeight
+		   );
+
+      drawText(
+	       "SHIFT",
+	       760 + (95 - textWidth) / 2,
+	       655 + (28 - textHeight) / 2,
+	       {230, 230, 220, 255}
+	       );
+    }    
 }
 
 void UI::renderStepButtons() {
@@ -653,8 +684,26 @@ void UI::updateOLEDContent() {
 		displayData.resonance);
   oledDrawString(buffer, 50, 87);
 
+  oledDrawString("START", 8, 99);
+  std::snprintf(
+      buffer,
+      sizeof(buffer),
+      "%.1f%%",
+      displayData.start * 100.0f
+  );
+  oledDrawString(buffer, 50, 99);
+
+  oledDrawString("END", 8, 111);
+  std::snprintf(
+      buffer,
+      sizeof(buffer),
+      "%.1f%%",
+      displayData.end * 100.0f
+  );
+  oledDrawString(buffer, 50, 111);  
+
   if (recordingData.recording) {
-    oledDrawString("REC RECORDING", 8, 105);
+    oledDrawString("REC RECORDING", 8, 120);
 
     std::snprintf(
 		  buffer,
@@ -664,13 +713,13 @@ void UI::updateOLEDContent() {
 		  std::fmod(recordingData.elapsedSeconds, 60.0f)
 		  );
 
-    oledDrawString(buffer, 8, 117);
+    oledDrawString(buffer, 85, 120);
   }
   else if (recordingData.saved) {
-    oledDrawString("SAMPLE SAVED", 8, 105);
+    oledDrawString("SAMPLE SAVED", 8, 120);
   }
   else {
-    oledDrawString("REC READY", 8, 105);
+    oledDrawString("REC READY", 8, 120);
   }  
 }
 
@@ -695,12 +744,11 @@ void UI::setTransportCallback(
 
 void UI::handleMouseClick(int x, int y) {
 
-  // INST button
-  if (y >= 610 && y <= 652 &&
-      x >= 100 && x < 195) {
-    instrumentSelectMode = !instrumentSelectMode;
-    lastStepSelectMode = false;
-    return;
+  // shift button
+  if (y >= 80 - 8 && y <= 80 - 8 + 65 &&
+      x >= 800 - 8 && x <= 800 - 8 + 105) {
+
+    shiftMode = !shiftMode;
   }
 
   // Function buttons.
@@ -828,7 +876,7 @@ void UI::handleEncoderMotion(int mouseY)
 
     encoderCallback(
         displayData.instrument,
-        draggingEncoder,
+	draggingEncoder + (shiftMode ? 4 : 0),
         deltaY * sensitivity
     );
 }

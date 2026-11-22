@@ -102,6 +102,8 @@ struct InstrumentDisplayData {
   float tune = 0.0f;
   float cutoff = 0.0f;
   float resonance = 0.0f;
+  float start = 0.0f;
+  float end = 1.0f;
 };
 
 class UI {
@@ -164,7 +166,9 @@ private:
 
   RecordingDisplayData recordingData;
 
-  std::function<void()> recordCallback;  
+  std::function<void()> recordCallback;
+
+  bool shiftMode = false;  
 
   void handleMouseClick(int x, int y);    
 

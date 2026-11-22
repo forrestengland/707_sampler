@@ -49,6 +49,8 @@ struct InstrumentParams {
   float tune = 0.0f;       // Semitones
   float cutoff = 20000.0f;
   float resonance = 0.0f;  // 0-1
+  float start = 0.0f;  // Normalized sample start
+  float end = 1.0f;    // Normalized sample end  
 };
 
 struct AtomicInstrumentParams {
@@ -58,6 +60,8 @@ struct AtomicInstrumentParams {
   std::atomic<float> tune{0.0f};
   std::atomic<float> cutoff{20000.0f};
   std::atomic<float> resonance{0.0f};
+  std::atomic<float> start{0.0f};    
+  std::atomic<float> end{0.0f};  
 };
 
 struct Instrument {
@@ -82,7 +86,11 @@ enum class EventType : uint8_t {
   AdjustLevel,
   AdjustTune,
   AdjustCutoff,
-  AdjustDecay
+  AdjustDecay,
+  AdjustResonance,
+  AdjustAttack,
+  AdjustStart,
+  AdjustEnd  
 };
 
 struct Event {
@@ -156,6 +164,8 @@ struct Voice {
   float ic2 = 0.0f;
 
   bool active = false;
+
+  uint64_t endFrame = 0;  
 };
 
 class AudioEngine {
@@ -191,6 +201,8 @@ public:
     values.tune = p.tune.load(std::memory_order_relaxed);
     values.cutoff = p.cutoff.load(std::memory_order_relaxed);
     values.resonance = p.resonance.load(std::memory_order_relaxed);
+    values.start = p.start.load(std::memory_order_relaxed);
+    values.end = p.end.load(std::memory_order_relaxed);        
 
     return true;
   }
@@ -619,6 +631,8 @@ private:
       destination.tune.store(source.tune, std::memory_order_relaxed);
       destination.cutoff.store(source.cutoff, std::memory_order_relaxed);
       destination.resonance.store(source.resonance, std::memory_order_relaxed);
+      destination.start.store(source.start, std::memory_order_relaxed);
+      destination.end.store(source.end, std::memory_order_relaxed);            
     }
 
     uint64_t stepMask = 0;
@@ -661,6 +675,7 @@ private:
   }
 
   void handleEvents() {
+
     Event event;
 
     while (queue.pop(event)) {
@@ -780,6 +795,36 @@ private:
 			     p.decay * std::pow(1000.0f, event.value),
 			     0.005f, 5.0f
 			     );
+	break;
+
+      case EventType::AdjustResonance:
+	p.resonance = std::clamp(
+				 p.resonance + event.value,
+				 0.0f, 1.0f
+				 );
+	break;
+
+      case EventType::AdjustAttack:
+	p.attack = std::clamp(
+			      p.attack + event.value * 0.5f,
+			      0.0f, 0.5f
+			      );
+	break;
+
+      case EventType::AdjustStart:
+	p.start = std::clamp(
+			     p.start + event.value,
+			     0.0f,
+			     std::max(0.0f, p.end - 0.001f)
+			     );
+	break;
+
+      case EventType::AdjustEnd:
+	p.end = std::clamp(
+			   p.end + event.value,
+			   std::min(1.0f, p.start + 0.001f),
+			   1.0f
+			   );
 	break;	
 
       default:
@@ -810,7 +855,25 @@ private:
 
     selected->sample = &sample;
     selected->instrument = instrument;
-    selected->position = 0.0;
+
+    uint64_t startFrame = static_cast<uint64_t>(
+						p.start * sample.frames
+						);
+
+    uint64_t endFrame = static_cast<uint64_t>(
+					      p.end * sample.frames
+					      );
+
+    startFrame = std::min(startFrame, sample.frames - 1);
+    endFrame = std::clamp(
+			  endFrame,
+			  startFrame + 1,
+			  sample.frames
+			  );
+
+ selected->position = static_cast<double>(startFrame);
+ selected->endFrame = endFrame;
+ 
     selected->elapsed = 0.0f;
     selected->increment =
       (static_cast<double>(sample.sampleRate) / sampleRate) *
@@ -927,9 +990,7 @@ private:
 
 	} else {
 
-	  uint64_t position = recordedFrames.load(
-						  std::memory_order_relaxed
-						  );
+	  uint64_t position = recordedFrames.load(std::memory_order_relaxed);
 
 	  uint64_t maxFrames = recordBuffer.size() / 2;
 
@@ -1030,13 +1091,13 @@ private:
 	uint64_t index =
 	  static_cast<uint64_t>(voice.position);
 
-	if (index >= sample.frames) {
+	if (voice.position >= static_cast<double>(voice.endFrame)) {
 	  voice.active = false;
 	  continue;
-	}
+	}	
 
 	uint64_t next =
-	  std::min(index + 1, sample.frames - 1);
+	  std::min(index + 1, voice.endFrame - 1);	
 
 	float fraction =
 	  static_cast<float>(
@@ -1180,35 +1241,47 @@ int main(int argc, char** argv) {
     engine.setLastStep(lastStep);
   });
 
-  ui.setEncoderCallback(
-			[&](int instrument, int encoder, float delta) {
+  ui.setEncoderCallback([&](int instrument, int encoder, float delta) {
 
-			  EventType type;
+    EventType type;
+    switch (encoder) {
+    case 0:
+      type = EventType::AdjustLevel;
+      break;
 
-			  switch (encoder) {
-			  case 0:
-			    type = EventType::AdjustLevel;
-			    break;
+    case 1:
+      type = EventType::AdjustTune;
+      break;
 
-			  case 1:
-			    type = EventType::AdjustTune;
-			    break;
+    case 2:
+      type = EventType::AdjustCutoff;
+      break;
 
-			  case 2:
-			    type = EventType::AdjustCutoff;
-			    break;
+    case 3:
+      type = EventType::AdjustDecay;
+      break;
 
-			  case 3:
-			    type = EventType::AdjustDecay;
-			    break;
+    case 4:
+      type = EventType::AdjustStart;
+      break;
 
-			  default:
-			    return;
-			  }
+    case 5:
+      type = EventType::AdjustResonance;
+      break;
 
-			  engine.setParameter(type, instrument, delta);
-			}
-			);
+    case 6:
+      type = EventType::AdjustAttack;
+      break;
+
+    case 7:
+      type = EventType::AdjustEnd;
+      break;      
+
+    default:
+      return;
+    }
+    engine.setParameter(type, instrument, delta);
+  });
 
   ui.setRecordCallback([&]() {
     if (!engine.toggleRecording()) {
@@ -1229,6 +1302,8 @@ int main(int argc, char** argv) {
       data.tune = params.tune;
       data.cutoff = params.cutoff;
       data.resonance = params.resonance;
+      data.start = params.start;
+      data.end = params.end;
       ui.setInstrumentDisplayData(data);
     }
 
